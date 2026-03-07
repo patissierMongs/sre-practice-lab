@@ -1,0 +1,53 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# === Node.js ===
+node_modules/
+frontend/node_modules/
+.next/
+dist/
+build/
+
+# === Docker ===
+*.log
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Monitoring Data ===
+# 볼륨 데이터는 Docker가 관리하지만 혹시 로컬에 남을 경우
+prometheus-data/
+grafana-data/
+
+# === Security ===
+# 민감한 공격 도구/결과는 포함하지 않음
+security/reports/*.html
+security/scripts/*.pcap
+
+# === Terraform ===
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/.terraform.lock.hcl
+
+# === Secrets ===
+*.pem
+*.key
+*.crt
+.env.local
+.env.production
+
+# === Claude Code ===
+.claude/

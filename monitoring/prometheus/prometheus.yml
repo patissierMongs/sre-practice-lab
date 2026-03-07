@@ -1,0 +1,40 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Prometheus 자체 메트릭
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # FastAPI 백엔드 메트릭
+  - job_name: "backend"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: "sre-backend"
+
+  # Nginx 메트릭 (Phase 2에서 nginx-exporter 추가 시)
+  # - job_name: "nginx"
+  #   static_configs:
+  #     - targets: ["nginx-exporter:9113"]
+
+  # PostgreSQL 메트릭 (Phase 2에서 postgres-exporter 추가 시)
+  # - job_name: "postgres"
+  #   static_configs:
+  #     - targets: ["postgres-exporter:9187"]
+
+  # Redis 메트릭 (Phase 2에서 redis-exporter 추가 시)
+  # - job_name: "redis"
+  #   static_configs:
+  #     - targets: ["redis-exporter:9121"]
