@@ -80,7 +80,7 @@ function WebTerminal({ onCommandGenerated }) {
       term.dispose();
       xtermRef.current = null;
     };
-  }, []); // eslint-disable-line
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 외부에서 명령어 전송 (바이패스 모드)
   useEffect(() => {
