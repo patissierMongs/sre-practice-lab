@@ -5,15 +5,19 @@ import PacketDetail from '../components/network/PacketDetail';
 import DDoSControl from '../components/network/DDoSControl';
 import TrafficStats from '../components/network/TrafficStats';
 import WebTerminal from '../components/network/WebTerminal';
+import LayerDiagram from '../components/network/LayerDiagram';
+import RequestXray from '../components/network/RequestXray';
 import { useTrafficWebSocket } from '../components/network/useTrafficWebSocket';
+import { useXrayWebSocket } from '../components/network/useXrayWebSocket';
 import api from '../api';
 
 function NetworkMonitor() {
   const { packets, connected, clearPackets } = useTrafficWebSocket();
+  const { systemState, traces, connected: xrayConnected, clearTraces } = useXrayWebSocket();
   const [selectedPacket, setSelectedPacket] = useState(null);
   const [capturing, setCapturing] = useState(true);
   const [filter, setFilter] = useState({ method: '', path: '', statusMin: '', statusMax: '' });
-  const [activeTab, setActiveTab] = useState('packets');
+  const [activeTab, setActiveTab] = useState('xray');
   const [terminalMode, setTerminalMode] = useState(false);
   const redCommandRef = useRef(null);
   const blueCommandRef = useRef(null);
@@ -71,6 +75,12 @@ function NetworkMonitor() {
         <div className="nm-right">
           <div className="nm-tabs">
             <button
+              className={`nm-tab nm-tab-xray ${activeTab === 'xray' ? 'active' : ''}`}
+              onClick={() => setActiveTab('xray')}
+            >
+              System X-ray
+            </button>
+            <button
               className={`nm-tab ${activeTab === 'packets' ? 'active' : ''}`}
               onClick={() => setActiveTab('packets')}
             >
@@ -82,6 +92,19 @@ function NetworkMonitor() {
             >
               Red / Blue Terminal
             </button>
+
+            {activeTab === 'xray' && (
+              <div className="tab-actions">
+                <div className="ws-status">
+                  <span className={`ws-dot ${xrayConnected ? 'connected' : ''}`} />
+                  {xrayConnected ? 'Live' : 'Disconnected'}
+                </div>
+                <button className="filter-btn" onClick={clearTraces} title="Clear traces">
+                  Clear
+                </button>
+                <span className="packet-count">{traces.length} traces</span>
+              </div>
+            )}
 
             {activeTab === 'packets' && (
               <div className="tab-actions">
@@ -105,6 +128,17 @@ function NetworkMonitor() {
               </div>
             )}
           </div>
+
+          {activeTab === 'xray' && (
+            <div className="nm-xray-panel">
+              <div className="nm-xray-left">
+                <LayerDiagram systemState={systemState} />
+              </div>
+              <div className="nm-xray-right">
+                <RequestXray traces={traces} />
+              </div>
+            </div>
+          )}
 
           {activeTab === 'packets' && (
             <div className="nm-packets-panel">

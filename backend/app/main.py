@@ -11,6 +11,7 @@ from app.api.health import router as health_router
 from app.api.posts import router as posts_router
 from app.api.security import router as security_router
 from app.api.traffic import router as traffic_router
+from app.api.system import router as system_router
 from app.middleware.traffic_capture import TrafficCaptureMiddleware
 from app.services.nginx_log_parser import tail_nginx_log
 
@@ -54,6 +55,7 @@ app.include_router(health_router, prefix="/api", tags=["Health"])
 app.include_router(posts_router, prefix="/api/posts", tags=["Posts"])
 app.include_router(security_router, prefix="/api/security", tags=["Security"])
 app.include_router(traffic_router, prefix="/api/traffic", tags=["Traffic"])
+app.include_router(system_router, prefix="/api/system", tags=["System"])
 
 
 @app.on_event("startup")
