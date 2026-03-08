@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Progress Quest</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Character Creation Screen -->
+  <div id="screen-create" class="screen active">
+    <div class="create-panel">
+      <h1>Progress Quest</h1>
+      <p class="subtitle">The Original Idle RPG</p>
+
+      <div class="create-form">
+        <div class="form-row">
+          <label for="char-name">Name</label>
+          <div class="name-row">
+            <input type="text" id="char-name" placeholder="Hero Name" maxlength="20">
+            <button id="btn-random-name" title="Random Name">&#x1f3b2;</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>Race</label>
+          <div id="race-list" class="option-grid"></div>
+        </div>
+
+        <div class="form-row">
+          <label>Class</label>
+          <div id="class-list" class="option-grid"></div>
+        </div>
+
+        <div class="form-row">
+          <label>Stats</label>
+          <div id="stat-rolls" class="stat-grid"></div>
+          <button id="btn-reroll" class="btn-secondary">Re-roll</button>
+        </div>
+
+        <button id="btn-start" class="btn-primary" disabled>Begin Quest</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="screen-game" class="screen">
+    <header class="game-header">
+      <span id="header-name" class="header-name"></span>
+      <span id="header-info" class="header-info"></span>
+    </header>
+
+    <div class="game-layout">
+      <!-- Left Column: Stats & Equipment -->
+      <div class="panel panel-left">
+        <section class="section">
+          <h2>Stats</h2>
+          <div id="stats-display" class="stats-grid"></div>
+        </section>
+
+        <section class="section">
+          <h2>Equipment</h2>
+          <div id="equipment-display" class="equipment-list"></div>
+        </section>
+      </div>
+
+      <!-- Center Column: Action & Progress -->
+      <div class="panel panel-center">
+        <section class="section">
+          <h2 id="action-title">Preparing...</h2>
+          <div class="progress-bar-container">
+            <div id="action-bar" class="progress-bar"></div>
+            <span id="action-label" class="progress-label"></span>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Experience</h2>
+          <div class="progress-bar-container">
+            <div id="exp-bar" class="progress-bar exp"></div>
+            <span id="exp-label" class="progress-label"></span>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Quest Progress</h2>
+          <div id="quest-name" class="quest-name"></div>
+          <div class="progress-bar-container">
+            <div id="quest-bar" class="progress-bar quest"></div>
+            <span id="quest-label" class="progress-label"></span>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Combat Log</h2>
+          <div id="combat-log" class="log-box"></div>
+        </section>
+      </div>
+
+      <!-- Right Column: Inventory & Spells -->
+      <div class="panel panel-right">
+        <section class="section">
+          <h2>Inventory <span id="inventory-count" class="badge"></span></h2>
+          <div id="inventory-display" class="inventory-list"></div>
+        </section>
+
+        <section class="section">
+          <h2>Spells</h2>
+          <div id="spells-display" class="spell-list"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="engine.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
