@@ -5,14 +5,41 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    # ─── HTTP / Web ───
     curl \
     wget \
-    bc \
+    httpie \
+    # ─── Network scanning & recon ───
+    nmap \
+    masscan \
+    nikto \
+    # ─── DNS ───
+    dnsutils \
+    # ─── Network utilities ───
     net-tools \
     iputils-ping \
-    dnsutils \
+    traceroute \
+    mtr-tiny \
     netcat-openbsd \
-    httpie \
+    socat \
+    iproute2 \
+    iptables \
+    tcpdump \
+    tshark \
+    # ─── SSL/TLS ───
+    openssl \
+    sslscan \
+    # ─── Text processing & scripting ───
+    bc \
+    jq \
+    vim-tiny \
+    less \
+    procps \
+    lsof \
+    strace \
+    # ─── Stress testing ───
+    hping3 \
+    arping \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
