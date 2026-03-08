@@ -792,12 +792,28 @@ table tr:hover { background: #f8f9fa; }
   font-family: 'Fira Code', monospace;
 }
 
-/* ─── 웹 터미널 ─── */
+/* ─── 웹 터미널 (Red/Blue Dual) ─── */
 .nm-terminal-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.nm-terminal-panel.dual-terminal {
+  flex-direction: row;
+}
+.terminal-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+.terminal-divider {
+  width: 3px;
+  background: #30363d;
+  cursor: col-resize;
+  flex-shrink: 0;
 }
 .web-terminal {
   flex: 1;
@@ -808,12 +824,30 @@ table tr:hover { background: #f8f9fa; }
 .terminal-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
+  gap: 10px;
+  padding: 5px 10px;
   background: #161b22;
   border-bottom: 1px solid #30363d;
   font-size: 11px;
 }
+.terminal-toolbar.team-red {
+  background: #1a0a0a;
+  border-bottom-color: #4a1010;
+}
+.terminal-toolbar.team-blue {
+  background: #0a0a1a;
+  border-bottom-color: #10104a;
+}
+.terminal-team-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.team-icon { font-size: 14px; }
+.team-label.team-red { color: #ff5252; }
+.team-label.team-blue { color: #448aff; }
 .terminal-status {
   display: flex;
   align-items: center;
@@ -828,23 +862,28 @@ table tr:hover { background: #f8f9fa; }
   padding: 2px;
 }
 .mode-btn {
-  padding: 4px 10px;
+  padding: 3px 8px;
   border: none;
   background: none;
   color: #8b949e;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   transition: all 0.2s;
 }
 .mode-btn:hover { color: #c9d1d9; }
-.mode-btn.active {
-  background: #1f6feb;
+.team-red .mode-btn.active {
+  background: #b71c1c;
+  color: #fff;
+}
+.team-blue .mode-btn.active {
+  background: #1565c0;
   color: #fff;
 }
 .terminal-hints {
   color: #8b949e;
   margin-left: auto;
+  font-size: 10px;
 }
 .terminal-container {
   flex: 1;
@@ -852,8 +891,22 @@ table tr:hover { background: #f8f9fa; }
   background: #0d1117;
   overflow: hidden;
 }
+.team-red .terminal-container {
+  background: #1a0000;
+}
+.team-blue .terminal-container {
+  background: #001027;
+}
 .terminal-container .xterm {
   height: 100%;
+}
+
+/* Red pane border accent */
+.red-pane {
+  border-right: 1px solid #4a1010;
+}
+.blue-pane {
+  border-left: 1px solid #10104a;
 }
 
 /* ─── 애니메이션 ─── */

@@ -173,15 +173,24 @@ async def ws_traffic(websocket: WebSocket):
 
 # ═══════════════════════════════════
 # WebSocket - 웹 터미널 (PTY)
+# team: "red" or "blue"
 # ═══════════════════════════════════
 
-@router.websocket("/ws/terminal")
-async def ws_terminal(websocket: WebSocket):
+async def _run_terminal(websocket: WebSocket, team: str):
+    """PTY 기반 터미널 세션 - Red/Blue team별 환경 분리"""
     await websocket.accept()
-    logger.info("ws_terminal_connected")
+    logger.info("ws_terminal_connected", team=team)
 
     # PTY 생성
     master_fd, slave_fd = pty.openpty()
+
+    # team별 환경변수 설정
+    env = os.environ.copy()
+    env["TERM"] = "xterm-256color"
+    env["TEAM"] = team
+
+    # team별 rcfile
+    rcfile = f"/etc/profile.d/{team}team.sh"
 
     pid = os.fork()
     if pid == 0:
@@ -192,7 +201,7 @@ async def ws_terminal(websocket: WebSocket):
         os.dup2(slave_fd, 1)
         os.dup2(slave_fd, 2)
         os.close(slave_fd)
-        os.execvp("/bin/bash", ["/bin/bash", "--login"])
+        os.execvpe("/bin/bash", ["/bin/bash", "--rcfile", rcfile, "-i"], env)
 
     # 부모 프로세스
     os.close(slave_fd)
@@ -203,7 +212,6 @@ async def ws_terminal(websocket: WebSocket):
 
     async def read_pty():
         """PTY 출력을 WebSocket으로 전송"""
-        loop = asyncio.get_event_loop()
         try:
             while True:
                 await asyncio.sleep(0.02)
@@ -225,25 +233,22 @@ async def ws_terminal(websocket: WebSocket):
             msg = await websocket.receive_json()
 
             if msg.get("type") == "input":
-                # 사용자 키 입력
                 os.write(master_fd, msg["data"].encode("utf-8"))
 
             elif msg.get("type") == "resize":
-                # 터미널 크기 변경
                 cols = msg.get("cols", 80)
                 rows = msg.get("rows", 24)
                 winsize = struct.pack("HHHH", rows, cols, 0, 0)
                 fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
             elif msg.get("type") == "command":
-                # 바이패스 모드: 명령어를 자동으로 터미널에 입력
                 cmd = msg["data"]
                 os.write(master_fd, (cmd + "\n").encode("utf-8"))
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.error("ws_terminal_error", error=str(e))
+        logger.error("ws_terminal_error", team=team, error=str(e))
     finally:
         read_task.cancel()
         os.close(master_fd)
@@ -252,4 +257,19 @@ async def ws_terminal(websocket: WebSocket):
             os.waitpid(pid, 0)
         except Exception:
             pass
-        logger.info("ws_terminal_disconnected")
+        logger.info("ws_terminal_disconnected", team=team)
+
+
+@router.websocket("/ws/terminal")
+async def ws_terminal(websocket: WebSocket):
+    await _run_terminal(websocket, "red")
+
+
+@router.websocket("/ws/terminal/red")
+async def ws_terminal_red(websocket: WebSocket):
+    await _run_terminal(websocket, "red")
+
+
+@router.websocket("/ws/terminal/blue")
+async def ws_terminal_blue(websocket: WebSocket):
+    await _run_terminal(websocket, "blue")

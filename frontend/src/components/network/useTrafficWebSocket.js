@@ -50,12 +50,13 @@ export function useTrafficWebSocket() {
   return { packets, connected, clearPackets };
 }
 
-export function useTerminalWebSocket() {
+export function useTerminalWebSocket(team = 'red') {
   const wsRef = useRef(null);
   const [connected, setConnected] = useState(false);
 
   const connect = useCallback((onData) => {
-    const ws = new WebSocket(`${WS_URL}/api/traffic/ws/terminal`);
+    const endpoint = team ? `/api/traffic/ws/terminal/${team}` : '/api/traffic/ws/terminal';
+    const ws = new WebSocket(`${WS_URL}${endpoint}`);
 
     ws.onopen = () => setConnected(true);
     ws.onclose = () => {
