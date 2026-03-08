@@ -13,9 +13,10 @@ function NetworkMonitor() {
   const [selectedPacket, setSelectedPacket] = useState(null);
   const [capturing, setCapturing] = useState(true);
   const [filter, setFilter] = useState({ method: '', path: '', statusMin: '', statusMax: '' });
-  const [activeTab, setActiveTab] = useState('packets'); // 'packets' or 'terminal'
+  const [activeTab, setActiveTab] = useState('packets');
   const [terminalMode, setTerminalMode] = useState(false);
-  const commandRef = useRef(null);
+  const redCommandRef = useRef(null);
+  const blueCommandRef = useRef(null);
 
   const handleToggleCapture = useCallback(async () => {
     try {
@@ -27,29 +28,27 @@ function NetworkMonitor() {
   }, []);
 
   const handleSendCommand = useCallback((cmd) => {
-    if (commandRef.current) {
-      commandRef.current(cmd);
+    // Send attack commands to Red Team terminal
+    if (redCommandRef.current) {
+      redCommandRef.current(cmd);
       setActiveTab('terminal');
     }
   }, []);
 
   const handleNodeClick = useCallback((serviceName) => {
     setFilter(prev => ({ ...prev, path: '', method: '' }));
-    // 해당 서비스의 패킷만 보이도록 간접 필터
   }, []);
 
   return (
     <div className="network-monitor">
-      {/* 상단 통계 바 */}
       <TrafficStats
         packets={packets}
         capturing={capturing}
         onToggleCapture={handleToggleCapture}
       />
 
-      {/* 메인 레이아웃: 좌우 분할 */}
       <div className="nm-main">
-        {/* 왼쪽: 토폴로지 + DDoS 컨트롤 */}
+        {/* Left: Topology + Attack Control */}
         <div className="nm-left">
           <div className="nm-topology">
             <div className="panel-header">
@@ -68,27 +67,26 @@ function NetworkMonitor() {
           />
         </div>
 
-        {/* 오른쪽: 패킷 리스트/상세 + 터미널 (탭) */}
+        {/* Right: Packets / Terminal (tabs) */}
         <div className="nm-right">
-          {/* 탭 헤더 */}
           <div className="nm-tabs">
             <button
               className={`nm-tab ${activeTab === 'packets' ? 'active' : ''}`}
               onClick={() => setActiveTab('packets')}
             >
-              📊 Packet Analysis
+              Packet Analysis
             </button>
             <button
               className={`nm-tab ${activeTab === 'terminal' ? 'active' : ''}`}
               onClick={() => setActiveTab('terminal')}
             >
-              ⌨️ Terminal
+              Red / Blue Terminal
             </button>
 
             {activeTab === 'packets' && (
               <div className="tab-actions">
                 <button className="filter-btn" onClick={clearPackets} title="Clear packets">
-                  🗑️ Clear
+                  Clear
                 </button>
                 <span className="packet-count">{packets.length} packets</span>
               </div>
@@ -108,7 +106,6 @@ function NetworkMonitor() {
             )}
           </div>
 
-          {/* 패킷 분석 탭 */}
           {activeTab === 'packets' && (
             <div className="nm-packets-panel">
               <div className="nm-packet-list">
@@ -126,10 +123,15 @@ function NetworkMonitor() {
             </div>
           )}
 
-          {/* 터미널 탭 */}
           {activeTab === 'terminal' && (
-            <div className="nm-terminal-panel">
-              <WebTerminal onCommandGenerated={commandRef} />
+            <div className="nm-terminal-panel dual-terminal">
+              <div className="terminal-pane red-pane">
+                <WebTerminal team="red" onCommandGenerated={redCommandRef} />
+              </div>
+              <div className="terminal-divider" />
+              <div className="terminal-pane blue-pane">
+                <WebTerminal team="blue" onCommandGenerated={blueCommandRef} />
+              </div>
             </div>
           )}
         </div>
