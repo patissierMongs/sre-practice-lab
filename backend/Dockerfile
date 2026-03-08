@@ -5,6 +5,14 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    curl \
+    wget \
+    bc \
+    net-tools \
+    iputils-ping \
+    dnsutils \
+    netcat-openbsd \
+    httpie \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
