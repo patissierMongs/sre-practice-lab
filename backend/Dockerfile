@@ -12,7 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # ─── Network scanning & recon ───
     nmap \
     masscan \
-    nikto \
     # ─── DNS ───
     dnsutils \
     # ─── Network utilities ───
@@ -64,7 +63,7 @@ echo -e "\\033[1;31m"\n\
 echo "  ╔══════════════════════════════════════╗"\n\
 echo "  ║     RED TEAM - Attack Terminal       ║"\n\
 echo "  ╠══════════════════════════════════════╣"\n\
-echo "  ║  nmap, hping3, curl, nc, nikto       ║"\n\
+echo "  ║  nmap, hping3, curl, nc, masscan     ║"\n\
 echo "  ║  masscan, socat, openssl, httpie     ║"\n\
 echo "  ╚══════════════════════════════════════╝"\n\
 echo -e "\\033[0m"\n\
