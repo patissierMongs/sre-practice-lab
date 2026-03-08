@@ -15,6 +15,7 @@ function Navbar() {
       <Link to="/" className={isActive('/') ? 'active' : ''}>Home</Link>
       <Link to="/posts" className={isActive('/posts') ? 'active' : ''}>게시판</Link>
       <Link to="/security" className={isActive('/security') ? 'active' : ''}>Security Lab</Link>
+      <Link to="/network" className={isActive('/network') ? 'active' : ''}>Network Monitor</Link>
       <div className="external">
         <a href="http://localhost:9090" target="_blank" rel="noreferrer">Prometheus</a>
         <a href="http://localhost:3001" target="_blank" rel="noreferrer">Grafana</a>

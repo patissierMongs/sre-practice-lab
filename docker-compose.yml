@@ -19,6 +19,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - nginx-logs:/var/log/nginx:ro
     networks:
       - app-network
     restart: unless-stopped
@@ -45,9 +47,26 @@ services:
     volumes:
       - ./infra/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infra/docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx-logs:/var/log/nginx
     depends_on:
       - backend
       - frontend
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # === Traffic Generator (DDoS Simulation) ===
+  traffic-generator:
+    build:
+      context: ./traffic-generator
+      dockerfile: Dockerfile
+    container_name: sre-traffic-generator
+    ports:
+      - "8001:8001"
+    environment:
+      - TARGET_URL=http://nginx:80
+    depends_on:
+      - nginx
     networks:
       - app-network
     restart: unless-stopped
@@ -144,6 +163,7 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+  nginx-logs:
 
 networks:
   app-network:

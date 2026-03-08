@@ -1,3 +1,5 @@
+import asyncio
+
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +10,9 @@ from app.core.database import engine, Base, async_session
 from app.api.health import router as health_router
 from app.api.posts import router as posts_router
 from app.api.security import router as security_router
+from app.api.traffic import router as traffic_router
+from app.middleware.traffic_capture import TrafficCaptureMiddleware
+from app.services.nginx_log_parser import tail_nginx_log
 
 # Import models so Base.metadata knows about all tables
 from app.models.post import Post  # noqa: F401
@@ -26,25 +31,29 @@ logger = structlog.get_logger()
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="SRE Practice Lab - 서버 & 네트워크 보안 실습",
-    version="0.1.0",
+    description="SRE Practice Lab - 서버 & 네트워크 보안 실습 + 네트워크 트래픽 시각화",
+    version="0.2.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost", "http://localhost:80"],
+    allow_origins=["http://localhost:3000", "http://localhost:3002", "http://localhost", "http://localhost:80", "http://localhost:8080"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 트래픽 캡처 미들웨어
+app.add_middleware(TrafficCaptureMiddleware)
 
 Instrumentator().instrument(app).expose(app)
 
 app.include_router(health_router, prefix="/api", tags=["Health"])
 app.include_router(posts_router, prefix="/api/posts", tags=["Posts"])
 app.include_router(security_router, prefix="/api/security", tags=["Security"])
+app.include_router(traffic_router, prefix="/api/traffic", tags=["Traffic"])
 
 
 @app.on_event("startup")
@@ -70,6 +79,9 @@ async def startup():
             session.add(user)
             await session.commit()
             logger.info("default_user_created", username="admin")
+
+    # Nginx 로그 파서 백그라운드 실행
+    asyncio.create_task(tail_nginx_log())
 
     logger.info("application_startup", environment=settings.ENVIRONMENT)
 
