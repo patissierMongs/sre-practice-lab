@@ -329,9 +329,10 @@ function getNodeHealth(sysState, deviceId) {
     case 'backend': {
       const errRate = app.error_rate || 0;
       const latency = app.avg_response_time_ms || 0;
+      const reqPerSec = app.active_requests_per_second || app.requests_per_second || 0;
       return {
         status: errRate > 20 ? 'danger' : errRate > 5 ? 'warning' : 'healthy',
-        label: `${latency.toFixed(0)}ms`,
+        label: latency > 0 ? `${latency.toFixed(0)}ms` : (reqPerSec > 0 ? `${reqPerSec} rps` : null),
         metric: errRate > 0 ? `${errRate.toFixed(1)}% err` : null,
       };
     }
@@ -356,9 +357,12 @@ function getNodeHealth(sysState, deviceId) {
       };
     }
     case 'attacker': {
+      if (synRecv <= 5) return null; // Don't show anything when idle
       return {
-        status: synRecv > 5 ? 'danger' : 'idle',
-        label: synRecv > 5 ? 'ACTIVE' : 'idle',
+        status: 'danger',
+        label: 'ACTIVE',
+        metric: `${synRecv} SYN`,
+        underAttack: true,
       };
     }
     default:
@@ -375,12 +379,13 @@ const STATUS_COLORS = {
 
 function drawNodeStatus(ctx, x, y, iconSize, health, time, labelLines) {
   if (!health) return;
-  if (health.status === 'idle') return; // Don't show bar for idle nodes
+  if (health.status === 'idle' || !health.label) return;
   const sc = STATUS_COLORS[health.status] || STATUS_COLORS.healthy;
 
   // Mini status bar below device label — offset based on label line count
   const fs = Math.max(8, iconSize * 0.20);
-  const labelOffset = (labelLines || 1) * (fs * 1.4 + 2);
+  const labelFs = Math.max(10, iconSize * 0.28);
+  const labelOffset = (labelLines || 1) * (labelFs + 2);
   const barW = iconSize * 0.7;
   const barH = 5;
   const barX = x - barW / 2;
