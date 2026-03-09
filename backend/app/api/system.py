@@ -206,6 +206,75 @@ async def _get_active_connections() -> dict:
     return conns
 
 
+async def _get_tcp_table() -> dict:
+    """Get full TCP connection table with all states (like netstat/ss)."""
+    # Get ALL TCP sockets in all states
+    output = await _run_cmd(["ss", "-tan"])
+    connections = []
+    state_counts = {}
+
+    for line in output.split("\n")[1:]:
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+
+        state = parts[0]
+        recv_q = parts[1]
+        send_q = parts[2]
+        local = parts[3]
+        peer = parts[4]
+
+        # Count by state
+        state_counts[state] = state_counts.get(state, 0) + 1
+
+        # Parse addresses
+        local_addr, local_port = _parse_addr(local)
+        peer_addr, peer_port = _parse_addr(peer)
+
+        # Map to service name
+        svc = _port_to_service(int(local_port) if local_port.isdigit() else 0)
+        peer_svc = _port_to_service(int(peer_port) if peer_port.isdigit() else 0)
+
+        connections.append({
+            "state": state,
+            "recv_q": int(recv_q) if recv_q.isdigit() else 0,
+            "send_q": int(send_q) if send_q.isdigit() else 0,
+            "local_addr": local_addr,
+            "local_port": local_port,
+            "peer_addr": peer_addr,
+            "peer_port": peer_port,
+            "service": svc or peer_svc,
+        })
+
+    return {
+        "connections": connections[-200:],  # cap at 200
+        "state_counts": state_counts,
+        "total": len(connections),
+    }
+
+
+def _parse_addr(addr_str: str) -> tuple[str, str]:
+    """Parse address:port from ss output."""
+    if addr_str.startswith("["):
+        # IPv6: [::1]:8000
+        bracket_end = addr_str.rfind("]")
+        if bracket_end >= 0:
+            return addr_str[1:bracket_end], addr_str[bracket_end + 2:]
+    if ":" in addr_str:
+        parts = addr_str.rsplit(":", 1)
+        return parts[0], parts[1]
+    return addr_str, ""
+
+
+def _port_to_service(port: int) -> str:
+    """Map port to service name."""
+    return {
+        80: "nginx", 443: "nginx-ssl", 8000: "backend",
+        3000: "frontend", 5432: "postgres", 6379: "redis",
+        9090: "prometheus", 3001: "grafana", 9093: "alertmanager",
+    }.get(port, "")
+
+
 async def _get_db_stats() -> dict:
     """Get PostgreSQL connection pool and activity stats."""
     try:
@@ -318,7 +387,7 @@ async def _get_nginx_status() -> dict:
 async def get_system_state():
     """Return comprehensive system state for X-ray visualization."""
     # Run all collectors concurrently
-    ports, iptables, connections, db_stats, redis_stats, nginx_status, kernel_drops = await asyncio.gather(
+    ports, iptables, connections, db_stats, redis_stats, nginx_status, kernel_drops, tcp_table = await asyncio.gather(
         _get_open_ports(),
         _get_iptables_rules(),
         _get_active_connections(),
@@ -326,6 +395,7 @@ async def get_system_state():
         _get_redis_stats(),
         _get_nginx_status(),
         _get_kernel_drop_stats(),
+        _get_tcp_table(),
     )
 
     from app.services.packet_store import packet_store
@@ -339,6 +409,7 @@ async def get_system_state():
             "iptables_rules": iptables,
             "active_connections": connections,
             "kernel_drops": kernel_drops,
+            "tcp_table": tcp_table,
         },
         "nginx": nginx_status | {
             "blocked_recent": traffic_stats.get("blocked", 0),

@@ -11,6 +11,7 @@ import RequestXray from '../components/network/RequestXray';
 import PacketParticles from '../components/network/PacketParticles';
 import ParticleInspector from '../components/network/ParticleInspector';
 import { useTrafficWebSocket } from '../components/network/useTrafficWebSocket';
+import TcpTable from '../components/network/TcpTable';
 import { useXrayWebSocket } from '../components/network/useXrayWebSocket';
 import api from '../api';
 
@@ -168,6 +169,7 @@ function NetworkMonitor() {
             <div className="nm-xray-panel">
               <div className="nm-xray-left">
                 <LayerDiagram systemState={systemState} />
+                <TcpTable systemState={systemState} />
               </div>
               <div className="nm-xray-right">
                 <RequestXray traces={traces} />
