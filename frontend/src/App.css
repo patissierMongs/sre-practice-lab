@@ -386,19 +386,7 @@ table tr:hover { background: #f8f9fa; }
   border: none !important;
 }
 
-/* 패킷 애니메이션 */
-.packet-anim-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 10;
-}
-.packet-dot {
-  filter: drop-shadow(0 0 4px currentColor);
-}
+/* 패킷 경로 애니메이션 (ReactFlow 커스텀 엣지에서 처리) */
 
 /* ─── 탭 ─── */
 .nm-tabs {
