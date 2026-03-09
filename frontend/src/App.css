@@ -386,19 +386,7 @@ table tr:hover { background: #f8f9fa; }
   border: none !important;
 }
 
-/* 패킷 애니메이션 */
-.packet-anim-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 10;
-}
-.packet-dot {
-  filter: drop-shadow(0 0 4px currentColor);
-}
+/* 패킷 경로 애니메이션 (ReactFlow 커스텀 엣지에서 처리) */
 
 /* ─── 탭 ─── */
 .nm-tabs {
@@ -1522,4 +1510,255 @@ table tr:hover { background: #f8f9fa; }
   font-size: 10px;
   color: #8b949e;
   font-family: monospace;
+}
+
+/* ── Kernel Netfilter Layer ── */
+.xray-layer-kernel { border-left: 3px solid #ef5350; }
+.xray-layer-alert { border-color: #ef5350; box-shadow: 0 0 12px rgba(239, 83, 80, 0.2); }
+
+/* Drop counters row */
+.xray-drop-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.xray-drop-counter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #1a0a0a;
+  border: 1px solid #3a1a1a;
+  border-radius: 6px;
+  transition: all 0.3s;
+}
+.xray-drop-flash {
+  background: #4a1010;
+  border-color: #ef5350;
+  box-shadow: 0 0 12px rgba(239, 83, 80, 0.5);
+  animation: dropFlash 1s ease-out;
+}
+@keyframes dropFlash {
+  0% { background: #ef535044; transform: scale(1.05); }
+  100% { background: #1a0a0a; transform: scale(1); }
+}
+.xray-drop-icon { font-size: 12px; }
+.xray-drop-value {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ef5350;
+}
+.xray-drop-label {
+  font-size: 10px;
+  color: #8b949e;
+}
+
+/* Drop rules */
+.xray-drop-rules { margin-top: 4px; }
+.xray-drop-rule {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: monospace;
+  background: #1a0a0a;
+  border-left: 2px solid #ef5350;
+  margin-bottom: 2px;
+}
+.xray-drop-rule-chain { color: #8b949e; min-width: 50px; }
+.xray-drop-rule-target { color: #ef5350; font-weight: 700; min-width: 45px; }
+.xray-drop-rule-src { color: #c9d1d9; }
+.xray-drop-rule-arrow { color: #484f58; }
+.xray-drop-rule-dst { color: #c9d1d9; }
+.xray-drop-rule-pkts {
+  margin-left: auto;
+  color: #ef5350;
+  font-weight: 600;
+}
+.xray-drop-rule-extra { color: #484f58; font-size: 10px; }
+
+/* Chain packet counter */
+.xray-chain-pkts {
+  margin-left: auto;
+  font-family: monospace;
+  font-size: 10px;
+  color: #484f58;
+}
+
+/* Interface drops */
+.xray-iface-drop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 11px;
+}
+.xray-iface-name {
+  font-family: monospace;
+  color: #58a6ff;
+  min-width: 40px;
+}
+.xray-iface-stat { color: #8b949e; font-size: 10px; }
+.xray-iface-drop-val { color: #ef5350; font-weight: 600; }
+
+/* Drop indicator on flow arrow */
+.xray-drop-indicator {
+  font-size: 10px;
+  color: #ef5350;
+  font-weight: 700;
+  animation: dropFlash 1.5s ease-in-out infinite;
+}
+
+/* Danger badge */
+.xray-badge-danger {
+  background: #3a1a1a !important;
+  color: #ef5350 !important;
+  border: 1px solid #5a2d2d;
+}
+
+/* ═══════════════════════════════════════
+   PACKET PARTICLES VISUALIZATION
+   ═══════════════════════════════════════ */
+
+.packet-particles-canvas {
+  width: 100%;
+  height: 100%;
+  background: #0d1117;
+  border-radius: 4px;
+}
+
+/* Topology view toggle */
+.topo-view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.topo-btn {
+  padding: 2px 10px;
+  border: 1px solid #21262d;
+  background: transparent;
+  color: #8b949e;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.topo-btn:first-child { border-radius: 4px 0 0 4px; }
+.topo-btn:last-child { border-radius: 0 4px 4px 0; }
+.topo-btn.active {
+  background: #21262d;
+  color: #e6edf3;
+  border-color: #58a6ff;
+}
+.topo-btn:hover:not(.active) {
+  background: #161b22;
+}
+
+/* ── Particle Inspector Popup ── */
+.particle-inspector {
+  position: fixed;
+  z-index: 1000;
+  width: 360px;
+  max-height: 400px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: piSlideIn 0.15s ease-out;
+}
+@keyframes piSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pi-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+.pi-method {
+  font-family: monospace;
+  font-weight: 700;
+  color: #4fc3f7;
+  font-size: 13px;
+}
+.pi-path {
+  flex: 1;
+  font-family: monospace;
+  font-size: 12px;
+  color: #c9d1d9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pi-status {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 13px;
+}
+.pi-close {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.pi-close:hover { color: #e6edf3; }
+
+.pi-body {
+  padding: 8px 12px;
+  overflow-y: auto;
+  max-height: 340px;
+}
+.pi-section {
+  margin-bottom: 10px;
+}
+.pi-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.pi-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  font-size: 11px;
+  color: #c9d1d9;
+}
+.pi-row span:first-child {
+  color: #8b949e;
+  min-width: 70px;
+}
+.pi-row-danger span:last-child {
+  color: #ef5350;
+  font-weight: 600;
+}
+.pi-row-mono {
+  font-family: monospace;
+  font-size: 10px;
+}
+.pi-payload {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: monospace;
+  font-size: 10px;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 100px;
+  overflow-y: auto;
+  margin: 0;
 }

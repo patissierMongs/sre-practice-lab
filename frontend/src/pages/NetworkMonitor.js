@@ -7,6 +7,8 @@ import TrafficStats from '../components/network/TrafficStats';
 import WebTerminal from '../components/network/WebTerminal';
 import LayerDiagram from '../components/network/LayerDiagram';
 import RequestXray from '../components/network/RequestXray';
+import PacketParticles from '../components/network/PacketParticles';
+import ParticleInspector from '../components/network/ParticleInspector';
 import { useTrafficWebSocket } from '../components/network/useTrafficWebSocket';
 import { useXrayWebSocket } from '../components/network/useXrayWebSocket';
 import api from '../api';
@@ -15,9 +17,12 @@ function NetworkMonitor() {
   const { packets, connected, clearPackets } = useTrafficWebSocket();
   const { systemState, traces, connected: xrayConnected, clearTraces } = useXrayWebSocket();
   const [selectedPacket, setSelectedPacket] = useState(null);
+  const [inspectedPacket, setInspectedPacket] = useState(null);
+  const [inspectPos, setInspectPos] = useState({ x: 0, y: 0 });
   const [capturing, setCapturing] = useState(true);
   const [filter, setFilter] = useState({ method: '', path: '', statusMin: '', statusMax: '' });
   const [activeTab, setActiveTab] = useState('xray');
+  const [topoView, setTopoView] = useState('particles'); // 'particles' or 'graph'
   const [terminalMode, setTerminalMode] = useState(false);
   const redCommandRef = useRef(null);
   const blueCommandRef = useRef(null);
@@ -43,6 +48,11 @@ function NetworkMonitor() {
     setFilter(prev => ({ ...prev, path: '', method: '' }));
   }, []);
 
+  const handleParticleClick = useCallback((packet, pos) => {
+    setInspectedPacket(packet);
+    setInspectPos(pos);
+  }, []);
+
   return (
     <div className="network-monitor">
       <TrafficStats
@@ -57,12 +67,37 @@ function NetworkMonitor() {
           <div className="nm-topology">
             <div className="panel-header">
               <h3>Service Topology</h3>
+              <div className="topo-view-toggle">
+                <button
+                  className={`topo-btn ${topoView === 'particles' ? 'active' : ''}`}
+                  onClick={() => setTopoView('particles')}
+                  title="Particle view"
+                >
+                  Particles
+                </button>
+                <button
+                  className={`topo-btn ${topoView === 'graph' ? 'active' : ''}`}
+                  onClick={() => setTopoView('graph')}
+                  title="Graph view"
+                >
+                  Graph
+                </button>
+              </div>
               <div className="ws-status">
                 <span className={`ws-dot ${connected ? 'connected' : ''}`} />
                 {connected ? 'Live' : 'Disconnected'}
               </div>
             </div>
-            <TopologyMap packets={packets} onNodeClick={handleNodeClick} />
+            {topoView === 'graph' ? (
+              <TopologyMap packets={packets} onNodeClick={handleNodeClick} />
+            ) : (
+              <PacketParticles
+                packets={packets}
+                width={900}
+                height={460}
+                onParticleClick={handleParticleClick}
+              />
+            )}
           </div>
 
           <DDoSControl
@@ -170,6 +205,15 @@ function NetworkMonitor() {
           )}
         </div>
       </div>
+
+      {/* Particle Inspector Popup */}
+      {inspectedPacket && (
+        <ParticleInspector
+          packet={inspectedPacket}
+          position={inspectPos}
+          onClose={() => setInspectedPacket(null)}
+        />
+      )}
     </div>
   );
 }

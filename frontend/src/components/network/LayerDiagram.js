@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 
 function MeterBar({ value, max, label, color = '#4fc3f7' }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
@@ -27,6 +27,32 @@ function StatBox({ label, value, unit, color }) {
   );
 }
 
+/** Flashing drop counter - flashes red when value changes */
+function DropCounter({ label, value, icon }) {
+  const prevRef = useRef(value);
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    if (value > prevRef.current) {
+      setFlash(true);
+      const t = setTimeout(() => setFlash(false), 1000);
+      prevRef.current = value;
+      return () => clearTimeout(t);
+    }
+    prevRef.current = value;
+  }, [value]);
+
+  if (value === 0 && !flash) return null;
+
+  return (
+    <div className={`xray-drop-counter ${flash ? 'xray-drop-flash' : ''}`}>
+      <span className="xray-drop-icon">{icon}</span>
+      <span className="xray-drop-value">{value}</span>
+      <span className="xray-drop-label">{label}</span>
+    </div>
+  );
+}
+
 function LayerDiagram({ systemState }) {
   if (!systemState) {
     return (
@@ -42,8 +68,14 @@ function LayerDiagram({ systemState }) {
   const ports = network?.open_ports || [];
   const iptables = network?.iptables_rules || [];
   const connections = network?.active_connections || {};
+  const kernelDrops = network?.kernel_drops || {};
   const chainRules = iptables.filter(r => r.type === 'chain');
-  const ruleCount = iptables.filter(r => r.type === 'rule').length;
+  const dropRules = iptables.filter(r => r.type === 'rule' && r.is_drop);
+  const allRules = iptables.filter(r => r.type === 'rule');
+  const totalIptDrops = kernelDrops?.iptables_drops || 0;
+  const totalIptRejects = kernelDrops?.iptables_rejects || 0;
+  const conntrack = kernelDrops?.conntrack || {};
+  const netDrops = kernelDrops?.netstat_drops || {};
 
   // DB layer
   const dbPoolSize = database?.pool_size || 20;
@@ -56,12 +88,108 @@ function LayerDiagram({ systemState }) {
   const redisMemory = redis?.used_memory_human || '0B';
   const redisHitRate = redis?.hit_rate || 0;
 
+  const hasDropActivity = totalIptDrops > 0 || totalIptRejects > 0 || (conntrack?.drop || 0) > 0;
+
   return (
     <div className="xray-layers">
+      {/* ── Kernel / Netfilter Layer ── */}
+      <div className={`xray-layer xray-layer-kernel ${hasDropActivity ? 'xray-layer-alert' : ''}`}>
+        <div className="xray-layer-header">
+          <span className="xray-layer-icon">{'\uD83D\uDEE1'}</span>
+          <span className="xray-layer-title">Kernel Netfilter</span>
+          {hasDropActivity && (
+            <span className="xray-layer-badge xray-badge-danger">
+              {totalIptDrops + totalIptRejects} drops
+            </span>
+          )}
+        </div>
+        <div className="xray-layer-body">
+          {/* Drop/Reject counters */}
+          <div className="xray-drop-row">
+            <DropCounter label="iptables DROP" value={totalIptDrops} icon={'\u274C'} />
+            <DropCounter label="iptables REJECT" value={totalIptRejects} icon={'\u{1F6AB}'} />
+            <DropCounter label="conntrack drop" value={conntrack?.drop || 0} icon={'\u26D4'} />
+            <DropCounter label="conntrack invalid" value={conntrack?.invalid || 0} icon={'\u26A0'} />
+          </div>
+
+          {/* iptables chains with per-rule drop counters */}
+          <div className="xray-layer-cols" style={{ marginTop: 8 }}>
+            <div className="xray-section">
+              <div className="xray-section-title">iptables Chains</div>
+              <div className="xray-iptables">
+                {chainRules.map((c, i) => (
+                  <div key={i} className="xray-chain">
+                    <span className="xray-chain-name">{c.chain}</span>
+                    <span className={`xray-chain-policy ${c.policy === 'ACCEPT' ? 'accept' : 'drop'}`}>
+                      {c.policy}
+                    </span>
+                    {c.packets !== undefined && (
+                      <span className="xray-chain-pkts">{c.packets} pkts</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Show DROP rules specifically */}
+              {dropRules.length > 0 && (
+                <div className="xray-drop-rules">
+                  <div className="xray-section-title" style={{ marginTop: 6 }}>Active DROP Rules</div>
+                  {dropRules.map((r, i) => (
+                    <div key={i} className="xray-drop-rule">
+                      <span className="xray-drop-rule-chain">{r.chain}</span>
+                      <span className="xray-drop-rule-target">{r.target}</span>
+                      <span className="xray-drop-rule-src">{r.source}</span>
+                      <span className="xray-drop-rule-arrow">{'\u2192'}</span>
+                      <span className="xray-drop-rule-dst">{r.destination}</span>
+                      <span className="xray-drop-rule-pkts">{r.packets} pkts</span>
+                      {r.extra && <span className="xray-drop-rule-extra">{r.extra}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {allRules.length > 0 && dropRules.length === 0 && (
+                <div className="xray-dim">{allRules.length} rules, no DROP rules active</div>
+              )}
+            </div>
+
+            <div className="xray-section">
+              <div className="xray-section-title">Conntrack</div>
+              <div className="xray-stats-row">
+                <StatBox label="Entries" value={conntrack?.entries || 0} />
+                <StatBox label="New" value={conntrack?.new || 0} />
+                <StatBox label="Delete" value={conntrack?.delete || 0} />
+              </div>
+              <div className="xray-section-title" style={{ marginTop: 6 }}>Interface Drops</div>
+              {Object.entries(netDrops).map(([iface, stats]) => (
+                <div key={iface} className="xray-iface-drop">
+                  <span className="xray-iface-name">{iface}</span>
+                  <span className="xray-iface-stat">
+                    RX: {stats.rx_packets}
+                    {stats.rx_drop > 0 && <span className="xray-iface-drop-val"> ({stats.rx_drop} drop)</span>}
+                  </span>
+                  <span className="xray-iface-stat">
+                    TX: {stats.tx_packets}
+                    {stats.tx_drop > 0 && <span className="xray-iface-drop-val"> ({stats.tx_drop} drop)</span>}
+                  </span>
+                </div>
+              ))}
+              {Object.keys(netDrops).length === 0 && <span className="xray-dim">No interface data</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Flow Arrow */}
+      <div className="xray-flow-arrow">
+        <svg width="24" height="32" viewBox="0 0 24 32">
+          <path d="M12 0 L12 24 M6 18 L12 26 L18 18" stroke={hasDropActivity ? '#ef5350' : '#4fc3f7'} strokeWidth="2" fill="none" />
+        </svg>
+        {hasDropActivity && <span className="xray-drop-indicator">{'\u274C'} DROP</span>}
+      </div>
+
       {/* Network Layer */}
       <div className="xray-layer xray-layer-network">
         <div className="xray-layer-header">
-          <span className="xray-layer-icon">&#x1F310;</span>
+          <span className="xray-layer-icon">{'\uD83C\uDF10'}</span>
           <span className="xray-layer-title">Network Layer</span>
           <span className="xray-layer-badge">{Object.values(connections).reduce((a, b) => a + b, 0)} conns</span>
         </div>
@@ -72,20 +200,6 @@ function LayerDiagram({ systemState }) {
               {ports.length > 0 ? ports.map((p, i) => (
                 <span key={i} className="xray-port-badge">:{p.port}</span>
               )) : <span className="xray-dim">No ports detected</span>}
-            </div>
-          </div>
-          <div className="xray-section">
-            <div className="xray-section-title">iptables</div>
-            <div className="xray-iptables">
-              {chainRules.map((c, i) => (
-                <div key={i} className="xray-chain">
-                  <span className="xray-chain-name">{c.chain}</span>
-                  <span className={`xray-chain-policy ${c.policy === 'ACCEPT' ? 'accept' : 'drop'}`}>
-                    {c.policy}
-                  </span>
-                </div>
-              ))}
-              {ruleCount > 0 && <div className="xray-dim">{ruleCount} rules active</div>}
             </div>
           </div>
           <div className="xray-section">

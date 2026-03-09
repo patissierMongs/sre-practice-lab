@@ -50,30 +50,139 @@ async def _get_open_ports() -> list[dict]:
 
 
 async def _get_iptables_rules() -> list[dict]:
-    """Get iptables rules."""
-    output = await _run_cmd(["iptables", "-L", "-n", "--line-numbers"])
+    """Get iptables rules with packet/byte counters (-v for drop tracking)."""
+    output = await _run_cmd(["iptables", "-L", "-n", "-v", "--line-numbers"])
     rules = []
     current_chain = ""
     for line in output.split("\n"):
         if line.startswith("Chain "):
             parts = line.split()
             current_chain = parts[1] if len(parts) > 1 else ""
+            # Extract policy and counters: Chain INPUT (policy ACCEPT 123 packets, 45678 bytes)
             policy = parts[3].rstrip(")") if len(parts) > 3 else ""
-            rules.append({"type": "chain", "chain": current_chain, "policy": policy})
-        elif line and not line.startswith("num") and current_chain:
+            chain_info = {"type": "chain", "chain": current_chain, "policy": policy}
+            # Parse packet counter from chain header
+            line_lower = line.lower()
+            if "packets" in line_lower:
+                try:
+                    pkt_idx = parts.index("packets,") - 1 if "packets," in parts else -1
+                    if pkt_idx >= 0:
+                        chain_info["packets"] = int(parts[pkt_idx])
+                except (ValueError, IndexError):
+                    pass
+            rules.append(chain_info)
+        elif line and not line.startswith("num") and not line.strip().startswith("pkts") and current_chain:
+            # -v format: num pkts bytes target prot opt in out source destination [extra]
             parts = line.split()
-            if len(parts) >= 4:
+            if len(parts) >= 9 and parts[0].strip().isdigit():
+                pkts = parts[1]
+                bytes_val = parts[2]
+                target = parts[3]
+                prot = parts[4]
+                source = parts[7] if len(parts) > 7 else ""
+                dest = parts[8] if len(parts) > 8 else ""
+                extra = " ".join(parts[9:]) if len(parts) > 9 else ""
+
+                # Parse human-readable counters
+                try:
+                    pkt_count = int(pkts) if pkts.isdigit() else 0
+                except ValueError:
+                    pkt_count = 0
+
                 rules.append({
                     "type": "rule",
                     "chain": current_chain,
-                    "num": parts[0] if parts[0].isdigit() else "",
-                    "target": parts[1] if len(parts) > 1 else "",
-                    "protocol": parts[2] if len(parts) > 2 else "",
-                    "source": parts[3] if len(parts) > 3 else "",
-                    "destination": parts[4] if len(parts) > 4 else "",
-                    "extra": " ".join(parts[5:]) if len(parts) > 5 else "",
+                    "num": parts[0],
+                    "target": target,
+                    "protocol": prot,
+                    "source": source,
+                    "destination": dest,
+                    "extra": extra,
+                    "packets": pkt_count,
+                    "bytes": bytes_val,
+                    "is_drop": target in ("DROP", "REJECT"),
                 })
     return rules
+
+
+async def _get_kernel_drop_stats() -> dict:
+    """Get kernel-level packet drop/reject statistics."""
+    stats = {
+        "iptables_drops": 0,
+        "iptables_rejects": 0,
+        "conntrack": {},
+        "netstat_drops": {},
+    }
+
+    # 1. Count total drops/rejects from iptables rules
+    ipt_output = await _run_cmd(["iptables", "-L", "-n", "-v", "-x"])
+    for line in ipt_output.split("\n"):
+        parts = line.split()
+        if len(parts) >= 4:
+            try:
+                pkts = int(parts[0])
+            except ValueError:
+                continue
+            target = parts[2]
+            if target == "DROP":
+                stats["iptables_drops"] += pkts
+            elif target == "REJECT":
+                stats["iptables_rejects"] += pkts
+
+    # 2. Conntrack stats (connection tracking)
+    ct_output = await _run_cmd(["cat", "/proc/net/stat/nf_conntrack"])
+    if not ct_output.startswith("error"):
+        lines = ct_output.strip().split("\n")
+        if len(lines) >= 2:
+            # Header line has field names; sum all CPU lines
+            headers = lines[0].split()
+            totals = {}
+            for line in lines[1:]:
+                vals = line.split()
+                for i, h in enumerate(headers):
+                    if i < len(vals):
+                        try:
+                            totals[h] = totals.get(h, 0) + int(vals[i], 16)
+                        except ValueError:
+                            pass
+            stats["conntrack"] = {
+                "entries": totals.get("entries", 0),
+                "searched": totals.get("searched", 0),
+                "found": totals.get("found", 0),
+                "new": totals.get("new", 0),
+                "invalid": totals.get("invalid", 0),
+                "ignore": totals.get("ignore", 0),
+                "delete": totals.get("delete", 0),
+                "insert": totals.get("insert", 0),
+                "insert_failed": totals.get("insert_failed", 0),
+                "drop": totals.get("drop", 0),
+                "early_drop": totals.get("early_drop", 0),
+            }
+
+    # 3. Network interface drops from /proc/net/dev
+    dev_output = await _run_cmd(["cat", "/proc/net/dev"])
+    if not dev_output.startswith("error"):
+        for line in dev_output.split("\n")[2:]:  # skip 2 header lines
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            iface, rest = line.split(":", 1)
+            iface = iface.strip()
+            vals = rest.split()
+            if len(vals) >= 11:
+                rx_drop = int(vals[3]) if vals[3].isdigit() else 0
+                tx_drop = int(vals[11]) if vals[11].isdigit() else 0
+                if rx_drop > 0 or tx_drop > 0 or iface in ("eth0", "lo"):
+                    stats["netstat_drops"][iface] = {
+                        "rx_packets": int(vals[0]) if vals[0].isdigit() else 0,
+                        "rx_drop": rx_drop,
+                        "rx_errors": int(vals[2]) if vals[2].isdigit() else 0,
+                        "tx_packets": int(vals[8]) if vals[8].isdigit() else 0,
+                        "tx_drop": tx_drop,
+                        "tx_errors": int(vals[10]) if vals[10].isdigit() else 0,
+                    }
+
+    return stats
 
 
 async def _get_active_connections() -> dict:
@@ -209,13 +318,14 @@ async def _get_nginx_status() -> dict:
 async def get_system_state():
     """Return comprehensive system state for X-ray visualization."""
     # Run all collectors concurrently
-    ports, iptables, connections, db_stats, redis_stats, nginx_status = await asyncio.gather(
+    ports, iptables, connections, db_stats, redis_stats, nginx_status, kernel_drops = await asyncio.gather(
         _get_open_ports(),
         _get_iptables_rules(),
         _get_active_connections(),
         _get_db_stats(),
         _get_redis_stats(),
         _get_nginx_status(),
+        _get_kernel_drop_stats(),
     )
 
     from app.services.packet_store import packet_store
@@ -228,6 +338,7 @@ async def get_system_state():
             "open_ports": ports,
             "iptables_rules": iptables,
             "active_connections": connections,
+            "kernel_drops": kernel_drops,
         },
         "nginx": nginx_status | {
             "blocked_recent": traffic_stats.get("blocked", 0),
