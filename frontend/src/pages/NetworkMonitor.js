@@ -13,6 +13,7 @@ import ParticleInspector from '../components/network/ParticleInspector';
 import { useTrafficWebSocket } from '../components/network/useTrafficWebSocket';
 import TcpTable from '../components/network/TcpTable';
 import { useXrayWebSocket } from '../components/network/useXrayWebSocket';
+import EventTimeline from '../components/network/EventTimeline';
 import api from '../api';
 
 function NetworkMonitor() {
@@ -92,6 +93,7 @@ function NetworkMonitor() {
             ) : (
               <PacketParticles
                 packets={packets}
+                systemState={systemState}
                 onParticleClick={handleParticleClick}
               />
             )}
@@ -128,6 +130,12 @@ function NetworkMonitor() {
               onClick={() => setActiveTab('xray')}
             >
               System X-ray
+            </button>
+            <button
+              className={`nm-tab nm-tab-timeline ${activeTab === 'timeline' ? 'active' : ''}`}
+              onClick={() => setActiveTab('timeline')}
+            >
+              Timeline
             </button>
             <button
               className={`nm-tab ${activeTab === 'packets' ? 'active' : ''}`}
@@ -174,6 +182,12 @@ function NetworkMonitor() {
               <div className="nm-xray-right">
                 <RequestXray traces={traces} />
               </div>
+            </div>
+          )}
+
+          {activeTab === 'timeline' && (
+            <div className="nm-timeline-panel">
+              <EventTimeline packets={packets} traces={traces} systemState={systemState} />
             </div>
           )}
 
