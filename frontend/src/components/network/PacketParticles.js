@@ -547,32 +547,88 @@ function drawEnvelope(ctx, x, y, color, size, blocked) {
 }
 
 // ── Packet route determination ──
-// Uses actual packet metadata from kernel/middleware tracing — not path guessing
+// Routes are built from real kernel ss/conntrack data, not hardcoded paths
 function isAttack(packet) {
   const at = packet.attack_type || '';
   return (at !== 'normal' && at !== '') || packet.blocked || packet.status_code === 429;
 }
 
-function getRequestRoute(packet) {
-  const origin = isAttack(packet) ? 'attacker' : 'client';
+// Build active connection set from systemState for route decisions
+function getActiveServices(systemState) {
+  if (!systemState) return {};
+  const flows = systemState.network?.service_flows || [];
+  const conns = systemState.network?.active_connections || {};
+  const active = {};
+  flows.forEach(f => { active[`${f.src}->${f.dst}`] = f.count; });
+  // Also add from active_connections (port-based)
+  Object.keys(conns).forEach(svc => { active[svc] = conns[svc]; });
+  return active;
+}
 
-  // Request route (outbound)
+function getRequestRoute(packet, activeServices) {
+  const origin = isAttack(packet) ? 'attacker' : 'client';
   const route = [origin, 'internet', 'nginx'];
 
   if (packet.blocked) {
-    // Blocked at nginx (rate limit / firewall) — stops here
+    return route; // Blocked at nginx
+  }
+
+  // Use actual path to determine if this goes to frontend or backend
+  const path = packet.path || '';
+  const isStatic = path === '/' || path.startsWith('/static') || path.endsWith('.js') ||
+                   path.endsWith('.css') || path.endsWith('.html') || path.endsWith('.ico') ||
+                   path.endsWith('.png') || path.endsWith('.svg') || path.endsWith('.json');
+
+  // Check if frontend has active kernel connections
+  const hasFrontendConn = activeServices['frontend'] > 0 ||
+                          activeServices['backend->frontend'] > 0 ||
+                          activeServices['nginx->frontend'] > 0;
+
+  if (isStatic && hasFrontendConn) {
+    route.push('frontend');
     return route;
   }
 
-  // Passed nginx → backend
+  // API request → backend
   route.push('backend');
 
-  // Only show DB hop if backend confirmed DB access via trace
-  if (packet.has_db) {
+  // Only add DB hop if kernel confirms backend→postgres connection AND trace says DB was used
+  if (packet.has_db && (activeServices['postgres'] > 0 || activeServices['backend->postgres'] > 0)) {
     route.push('postgres');
   }
 
   return route;
+}
+
+// Generate flow-based particles for persistent kernel connections
+// (redis keepalive, prometheus scraping, frontend static serving)
+function generateFlowParticles(systemState) {
+  if (!systemState) return [];
+  const flows = systemState.network?.service_flows || [];
+  const conns = systemState.network?.active_connections || {};
+  const particles = [];
+
+  // Map ss flows to topology routes
+  flows.forEach(f => {
+    if (f.src === 'backend' && f.dst === 'redis' && f.count > 0) {
+      particles.push({ route: ['backend', 'redis'], color: '#22c55e', type: 'flow', label: 'redis' });
+    }
+    if (f.src === 'backend' && f.dst === 'postgres' && f.count > 0) {
+      particles.push({ route: ['backend', 'postgres'], color: '#4ade80', type: 'flow', label: 'pg-keepalive' });
+    }
+  });
+
+  // Prometheus scraping (if connection active)
+  if (conns['prometheus'] > 0) {
+    particles.push({ route: ['prometheus', 'backend'], color: '#fbbf24', type: 'flow', label: 'scrape' });
+  }
+
+  // Nginx → Frontend for static file serving (always active when frontend is up)
+  if (conns['frontend'] > 0) {
+    particles.push({ route: ['nginx', 'frontend'], color: '#94a3b8', type: 'flow', label: 'static' });
+  }
+
+  return particles;
 }
 
 function getColor(packet) {
@@ -756,27 +812,32 @@ class PortScanRipple {
 
 // ── Packet envelope entity ──
 class PacketEnvelope {
-  constructor(packet, route, id, dmap, isResponse = false) {
+  constructor(packet, route, id, dmap, isResponse = false, opts = {}) {
     this.id = id;
     this.packet = packet;
     this.route = route;
     this.isResponse = isResponse;
-    this.color = isResponse ? getResponseColor(packet) : getColor(packet);
-    this.size = isResponse ? 13 : 16;
+    this.isFlow = opts.isFlow || false; // kernel flow particle (not HTTP)
+    this.color = opts.color || (isResponse ? getResponseColor(packet) : getColor(packet));
+    this.size = this.isFlow ? 10 : (isResponse ? 13 : 16);
     this.opacity = 1;
     this.progress = 0;
     this.segIdx = 0;
-    this.speed = 0.006 + Math.random() * 0.005;
+    this.speed = this.isFlow ? (0.004 + Math.random() * 0.003) : (0.006 + Math.random() * 0.005);
     this.alive = true;
     this.bouncing = false;
-    this.settled = false; // becomes debris
+    this.settled = false;
     this.bvx = 0;
     this.bvy = 0;
     this.x = 0;
     this.y = 0;
     this.dmap = dmap;
     this.impactSpawned = false;
-    this._pos();
+    // Delay start: response waits for request to arrive first
+    this.delay = opts.delay || 0;
+    this.waiting = this.delay > 0;
+    this.delayStart = Date.now();
+    if (!this.waiting) this._pos();
   }
 
   _pos() {
@@ -792,6 +853,12 @@ class PacketEnvelope {
 
   update() {
     if (!this.alive) return;
+    // Wait for delay before starting (response packets wait for request to arrive)
+    if (this.waiting) {
+      if (Date.now() - this.delayStart < this.delay) return;
+      this.waiting = false;
+      this._pos();
+    }
     if (this.bouncing) {
       this.x += this.bvx;
       this.y += this.bvy;
@@ -844,9 +911,21 @@ class PacketEnvelope {
   }
 
   draw(ctx) {
-    if (!this.alive) return;
+    if (!this.alive || this.waiting) return;
     ctx.save();
     ctx.globalAlpha = this.opacity;
+    if (this.isFlow) {
+      // Flow particle: small pulsing dot (kernel-observed connection)
+      const r = this.size * 0.35;
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
     if (this.isResponse) {
       // Response: smaller, filled circle with arrow ← (simpler shape)
       const r = this.size * 0.4;
@@ -906,6 +985,7 @@ function PacketParticles({ packets, systemState, onParticleClick }) {
   const prevLenRef = useRef(0);
   const animRef = useRef(null);
   const sizeRef = useRef({ w: 600, h: 400 });
+  const lastFlowSpawnRef = useRef(0);
   const dposRef = useRef({});
   const sysRef = useRef(null);
   const synWavesRef = useRef([]);
@@ -949,7 +1029,7 @@ function PacketParticles({ packets, systemState, onParticleClick }) {
     return () => ro.disconnect();
   }, [computePos]);
 
-  // Ingest new packets
+  // Ingest new packets — route based on real kernel flow data
   useEffect(() => {
     if (!packets || packets.length === 0) return;
     if (packets.length <= prevLenRef.current) {
@@ -959,19 +1039,25 @@ function PacketParticles({ packets, systemState, onParticleClick }) {
     const fresh = packets.slice(prevLenRef.current);
     prevLenRef.current = packets.length;
 
+    // Get active services from kernel ss data
+    const activeServices = getActiveServices(sysRef.current);
+
     fresh.forEach(pkt => {
-      const reqRoute = getRequestRoute(pkt);
+      const reqRoute = getRequestRoute(pkt, activeServices);
       if (reqRoute.length < 2) return;
 
       // Request envelope (outbound)
       idRef.current++;
       envRef.current.push(new PacketEnvelope(pkt, reqRoute, idRef.current, dposRef.current, false));
 
-      // Response envelope (return trip) — only if not blocked
+      // Response envelope (return trip) — delayed so it starts after request arrives
+      // Delay = estimated time for request to travel its full route
       if (!pkt.blocked) {
         idRef.current++;
         const respRoute = [...reqRoute].reverse();
-        envRef.current.push(new PacketEnvelope(pkt, respRoute, idRef.current, dposRef.current, true));
+        const hops = reqRoute.length - 1;
+        const delayMs = hops * 600 + Math.random() * 300; // ~600ms per hop
+        envRef.current.push(new PacketEnvelope(pkt, respRoute, idRef.current, dposRef.current, true, { delay: delayMs }));
       }
     });
 
@@ -998,8 +1084,36 @@ function PacketParticles({ packets, systemState, onParticleClick }) {
       // Grid
       drawGrid(ctx, w, h);
 
-      // Active links for glow
+      // Spawn flow particles from real kernel connections (every 3s)
+      const now0 = Date.now();
+      if (now0 - lastFlowSpawnRef.current > 3000) {
+        lastFlowSpawnRef.current = now0;
+        const ss = sysRef.current;
+        if (ss) {
+          const flowDefs = generateFlowParticles(ss);
+          flowDefs.forEach(fd => {
+            if (fd.route.length >= 2) {
+              idRef.current++;
+              const fakePacket = { path: fd.label, status_code: 200, blocked: false };
+              envRef.current.push(new PacketEnvelope(
+                fakePacket, fd.route, idRef.current, dp, false,
+                { isFlow: true, color: fd.color }
+              ));
+            }
+          });
+        }
+      }
+
+      // Active links for glow — combine envelope counts with kernel flow data
       const activeLinks = getActiveLinks(envRef.current);
+      const ss = sysRef.current;
+      if (ss) {
+        const kernelFlows = ss.network?.service_flows || [];
+        kernelFlows.forEach(f => {
+          const key = `${f.src}->${f.dst}`;
+          activeLinks[key] = (activeLinks[key] || 0) + f.count;
+        });
+      }
 
       // Wires
       LINKS.forEach(link => {
@@ -1007,7 +1121,8 @@ function PacketParticles({ packets, systemState, onParticleClick }) {
         const b = dp[link.to];
         if (!a || !b) return;
         const key = `${link.from}->${link.to}`;
-        const count = activeLinks[key] || 0;
+        const revKey = `${link.to}->${link.from}`;
+        const count = (activeLinks[key] || 0) + (activeLinks[revKey] || 0);
         drawWire(ctx, a, b, link.fromPort, link.toPort, count > 0, iconSize, count);
       });
 

@@ -206,6 +206,53 @@ async def _get_active_connections() -> dict:
     return conns
 
 
+async def _get_service_flows() -> list[dict]:
+    """Get real TCP flows between services using kernel ss data.
+    Returns list of {src, dst, count, bytes_sent} for active connections."""
+    # Use ss with info flag to get bytes transferred
+    output = await _run_cmd(["ss", "-tn", "-i", "state", "established"])
+    flows = {}
+    current_line = None
+
+    for line in output.split("\n")[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        # ss -i outputs: connection line, then indented info line
+        parts = line.split()
+        if len(parts) >= 5 and not line.startswith("\t") and not line.startswith(" "):
+            local = parts[3]
+            peer = parts[4]
+            local_port = _parse_port(local)
+            peer_port = _parse_port(peer)
+            # Determine src and dst service
+            src_svc = _port_to_service(local_port) or "backend"
+            dst_svc = _port_to_service(peer_port)
+            if not dst_svc:
+                continue
+            key = f"{src_svc}->{dst_svc}"
+            if key not in flows:
+                flows[key] = {"count": 0}
+            flows[key]["count"] += 1
+
+    result = []
+    for key, info in flows.items():
+        src, dst = key.split("->")
+        result.append({"src": src, "dst": dst, "count": info["count"]})
+    return result
+
+
+def _parse_port(addr_str: str) -> int:
+    """Extract port number from ss address string."""
+    if ":" in addr_str:
+        port_str = addr_str.rsplit(":", 1)[-1]
+        try:
+            return int(port_str)
+        except ValueError:
+            return 0
+    return 0
+
+
 async def _get_tcp_table() -> dict:
     """Get full TCP connection table with all states (like netstat/ss)."""
     # Get ALL TCP sockets in all states
@@ -387,7 +434,7 @@ async def _get_nginx_status() -> dict:
 async def get_system_state():
     """Return comprehensive system state for X-ray visualization."""
     # Run all collectors concurrently
-    ports, iptables, connections, db_stats, redis_stats, nginx_status, kernel_drops, tcp_table = await asyncio.gather(
+    ports, iptables, connections, db_stats, redis_stats, nginx_status, kernel_drops, tcp_table, service_flows = await asyncio.gather(
         _get_open_ports(),
         _get_iptables_rules(),
         _get_active_connections(),
@@ -396,6 +443,7 @@ async def get_system_state():
         _get_nginx_status(),
         _get_kernel_drop_stats(),
         _get_tcp_table(),
+        _get_service_flows(),
     )
 
     from app.services.packet_store import packet_store
@@ -410,6 +458,7 @@ async def get_system_state():
             "active_connections": connections,
             "kernel_drops": kernel_drops,
             "tcp_table": tcp_table,
+            "service_flows": service_flows,
         },
         "nginx": nginx_status | {
             "blocked_recent": traffic_stats.get("blocked", 0),

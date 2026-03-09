@@ -42,7 +42,6 @@ function WebTerminal({ team = 'red', onCommandGenerated }) {
   const xtermRef = useRef(null);
   const fitAddonRef = useRef(null);
   const { connect, sendInput, sendCommand, sendResize, disconnect, connected } = useTerminalWebSocket(team);
-  const [mode, setMode] = useState('terminal');
 
   useEffect(() => {
     if (!termRef.current || xtermRef.current) return;
@@ -99,19 +98,16 @@ function WebTerminal({ team = 'red', onCommandGenerated }) {
   useEffect(() => {
     if (onCommandGenerated) {
       onCommandGenerated.current = (cmd) => {
-        if (mode === 'bypass') {
-          sendCommand(cmd);
-        } else {
-          if (xtermRef.current) {
-            xtermRef.current.write('\r\n\x1b[33m# Copy and run the command below:\x1b[0m\r\n');
-            cmd.split('\n').forEach(line => {
-              xtermRef.current.write(`\x1b[36m${line}\x1b[0m\r\n`);
-            });
-          }
+        // Always show command in terminal for user to copy/run
+        if (xtermRef.current) {
+          xtermRef.current.write('\r\n\x1b[33m# Copy and run the command below:\x1b[0m\r\n');
+          cmd.split('\n').forEach(line => {
+            xtermRef.current.write(`\x1b[36m${line}\x1b[0m\r\n`);
+          });
         }
       };
     }
-  }, [mode, sendCommand, onCommandGenerated]);
+  }, [sendCommand, onCommandGenerated]);
 
   const teamLabel = team === 'red' ? 'RED TEAM' : 'BLUE TEAM';
   const teamClass = team === 'red' ? 'team-red' : 'team-blue';
@@ -127,23 +123,6 @@ function WebTerminal({ team = 'red', onCommandGenerated }) {
         <div className="terminal-status">
           <span className={`terminal-dot ${connected ? 'connected' : ''}`} />
           <span>{connected ? 'Connected' : 'Disconnected'}</span>
-        </div>
-
-        <div className="terminal-mode-switch">
-          <button
-            className={`mode-btn ${mode === 'terminal' ? 'active' : ''}`}
-            onClick={() => setMode('terminal')}
-            title="Terminal mode: type commands directly"
-          >
-            Terminal
-          </button>
-          <button
-            className={`mode-btn ${mode === 'bypass' ? 'active' : ''}`}
-            onClick={() => setMode('bypass')}
-            title="Bypass mode: buttons auto-execute in terminal"
-          >
-            Bypass
-          </button>
         </div>
 
         <div className="terminal-hints">
