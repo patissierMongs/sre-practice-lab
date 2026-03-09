@@ -1617,3 +1617,148 @@ table tr:hover { background: #f8f9fa; }
   color: #ef5350 !important;
   border: 1px solid #5a2d2d;
 }
+
+/* ═══════════════════════════════════════
+   PACKET PARTICLES VISUALIZATION
+   ═══════════════════════════════════════ */
+
+.packet-particles-canvas {
+  width: 100%;
+  height: 100%;
+  background: #0d1117;
+  border-radius: 4px;
+}
+
+/* Topology view toggle */
+.topo-view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.topo-btn {
+  padding: 2px 10px;
+  border: 1px solid #21262d;
+  background: transparent;
+  color: #8b949e;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.topo-btn:first-child { border-radius: 4px 0 0 4px; }
+.topo-btn:last-child { border-radius: 0 4px 4px 0; }
+.topo-btn.active {
+  background: #21262d;
+  color: #e6edf3;
+  border-color: #58a6ff;
+}
+.topo-btn:hover:not(.active) {
+  background: #161b22;
+}
+
+/* ── Particle Inspector Popup ── */
+.particle-inspector {
+  position: fixed;
+  z-index: 1000;
+  width: 360px;
+  max-height: 400px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: piSlideIn 0.15s ease-out;
+}
+@keyframes piSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pi-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+.pi-method {
+  font-family: monospace;
+  font-weight: 700;
+  color: #4fc3f7;
+  font-size: 13px;
+}
+.pi-path {
+  flex: 1;
+  font-family: monospace;
+  font-size: 12px;
+  color: #c9d1d9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pi-status {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 13px;
+}
+.pi-close {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.pi-close:hover { color: #e6edf3; }
+
+.pi-body {
+  padding: 8px 12px;
+  overflow-y: auto;
+  max-height: 340px;
+}
+.pi-section {
+  margin-bottom: 10px;
+}
+.pi-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.pi-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  font-size: 11px;
+  color: #c9d1d9;
+}
+.pi-row span:first-child {
+  color: #8b949e;
+  min-width: 70px;
+}
+.pi-row-danger span:last-child {
+  color: #ef5350;
+  font-weight: 600;
+}
+.pi-row-mono {
+  font-family: monospace;
+  font-size: 10px;
+}
+.pi-payload {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: monospace;
+  font-size: 10px;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 100px;
+  overflow-y: auto;
+  margin: 0;
+}
