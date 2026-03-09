@@ -10,18 +10,22 @@ import React, { useRef, useEffect, useCallback } from 'react';
 
 // ── Topology layout ──
 const DEVICES = [
-  { id: 'internet',    label: 'Internet',          type: 'cloud',   nx: 0.08, ny: 0.38 },
-  { id: 'nginx',       label: 'Nginx',             type: 'router',  nx: 0.28, ny: 0.38 },
-  { id: 'frontend',    label: 'Frontend\n(React)',  type: 'pc',      nx: 0.50, ny: 0.13 },
-  { id: 'backend',     label: 'Backend\n(FastAPI)', type: 'server',  nx: 0.50, ny: 0.62 },
-  { id: 'postgres',    label: 'PostgreSQL',         type: 'db',      nx: 0.78, ny: 0.42 },
-  { id: 'redis',       label: 'Redis',              type: 'db',      nx: 0.78, ny: 0.78 },
-  { id: 'prometheus',  label: 'Prometheus',         type: 'monitor', nx: 0.28, ny: 0.80 },
-  { id: 'grafana',     label: 'Grafana',            type: 'monitor', nx: 0.08, ny: 0.80 },
+  { id: 'client',      label: 'Client',             type: 'laptop',  nx: 0.06, ny: 0.18 },
+  { id: 'attacker',    label: 'Attacker',           type: 'laptop',  nx: 0.06, ny: 0.58 },
+  { id: 'internet',    label: 'Internet',           type: 'cloud',   nx: 0.22, ny: 0.38 },
+  { id: 'nginx',       label: 'Nginx',              type: 'router',  nx: 0.40, ny: 0.38 },
+  { id: 'frontend',    label: 'Frontend\n(React)',   type: 'pc',      nx: 0.60, ny: 0.13 },
+  { id: 'backend',     label: 'Backend\n(FastAPI)',  type: 'server',  nx: 0.60, ny: 0.62 },
+  { id: 'postgres',    label: 'PostgreSQL',          type: 'db',      nx: 0.84, ny: 0.42 },
+  { id: 'redis',       label: 'Redis',               type: 'db',      nx: 0.84, ny: 0.78 },
+  { id: 'prometheus',  label: 'Prometheus',          type: 'monitor', nx: 0.40, ny: 0.82 },
+  { id: 'grafana',     label: 'Grafana',             type: 'monitor', nx: 0.22, ny: 0.82 },
 ];
 
 const LINKS = [
-  { from: 'internet',   to: 'nginx',      fromPort: ':80',   toPort: ':80' },
+  { from: 'client',     to: 'internet',   fromPort: '',      toPort: '' },
+  { from: 'attacker',   to: 'internet',   fromPort: '',      toPort: '' },
+  { from: 'internet',   to: 'nginx',      fromPort: '',      toPort: ':80' },
   { from: 'nginx',      to: 'frontend',   fromPort: ':3000', toPort: ':3000' },
   { from: 'nginx',      to: 'backend',    fromPort: ':8000', toPort: ':8000' },
   { from: 'backend',    to: 'postgres',   fromPort: '',      toPort: ':5432' },
@@ -45,6 +49,7 @@ const C = {
   router:  { fill: '#0c2a1e', stroke: '#10b981', accent: '#34d399' },
   server:  { fill: '#172040', stroke: '#3b82f6', accent: '#60a5fa' },
   pc:      { fill: '#1a2030', stroke: '#64748b', accent: '#94a3b8' },
+  laptop:  { fill: '#1a1a30', stroke: '#818cf8', accent: '#a5b4fc' },
   db:      { fill: '#1a2e1a', stroke: '#22c55e', accent: '#4ade80' },
   monitor: { fill: '#2a1a0a', stroke: '#f59e0b', accent: '#fbbf24' },
 };
@@ -258,11 +263,50 @@ function drawMonitor(ctx, x, y, s, colors) {
   ctx.restore();
 }
 
+function drawLaptop(ctx, x, y, s, colors) {
+  ctx.save();
+  const bw = s * 0.65, bh = s * 0.42;
+  // Screen (tilted back slightly)
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  rrect(ctx, x - bw / 2, y - bh / 2 - 8, bw, bh, 3);
+  ctx.fill();
+  ctx.stroke();
+  // Screen inner
+  ctx.fillStyle = '#060c1a';
+  rrect(ctx, x - bw / 2 + 3, y - bh / 2 - 5, bw - 6, bh - 6, 2);
+  ctx.fill();
+  // Cursor blink line on screen
+  ctx.strokeStyle = colors.accent;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x - bw / 6, y - 6);
+  ctx.lineTo(x + bw / 6, y - 6);
+  ctx.stroke();
+  // Keyboard base (wider, thinner)
+  ctx.fillStyle = colors.stroke + '40';
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 1.5;
+  const kw = bw * 1.1, kh = s * 0.10;
+  const ky = y + bh / 2 - 8;
+  ctx.beginPath();
+  ctx.moveTo(x - kw / 2, ky + kh);
+  ctx.lineTo(x - bw / 2, ky);
+  ctx.lineTo(x + bw / 2, ky);
+  ctx.lineTo(x + kw / 2, ky + kh);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 const ICON_RENDERERS = {
   cloud: drawCloud,
   router: drawRouter,
   server: drawServer,
   pc: drawPC,
+  laptop: drawLaptop,
   db: drawDB,
   monitor: drawMonitor,
 };
@@ -367,22 +411,35 @@ function drawEnvelope(ctx, x, y, color, size, blocked) {
 }
 
 // ── Packet route determination ──
+function isAttack(packet) {
+  return packet.blocked || packet.attack_type === 'xss' || packet.attack_type === 'sqli'
+    || packet.attack_type === 'ddos' || (packet.status_code && packet.status_code === 429);
+}
+
 function getRoute(packet) {
   const path = packet.path || '';
   const layer = packet.layer || '';
+  const attack = isAttack(packet);
+  const origin = attack ? 'attacker' : 'client';
 
   if (layer === 'nginx') {
-    const route = ['internet', 'nginx'];
+    const route = [origin, 'internet', 'nginx'];
     if (!packet.blocked) {
       route.push(path.startsWith('/api') ? 'backend' : 'frontend');
     }
     return route;
   }
 
-  const route = ['nginx', 'backend'];
-  if (!packet.blocked && (path.includes('/posts') || path.includes('/users') || path.includes('/health'))) {
-    route.push('postgres');
+  const route = [origin, 'internet', 'nginx', 'backend'];
+
+  // SQLi attacks that aren't blocked reach the DB
+  const dbPath = path.includes('/posts') || path.includes('/users') || path.includes('/health');
+  if (dbPath || packet.attack_type === 'sqli') {
+    if (!packet.blocked) {
+      route.push('postgres');
+    }
   }
+
   return route;
 }
 
@@ -391,6 +448,98 @@ function getColor(packet) {
   if (packet.status_code >= 500) return '#f97316';
   if (packet.status_code >= 400) return '#eab308';
   return '#22d3ee';
+}
+
+// ── Debris: dropped packets that pile up ──
+class Debris {
+  constructor(x, y, color, packet) {
+    this.x = x + (Math.random() - 0.5) * 20;
+    this.y = y + Math.random() * 10;
+    this.color = color;
+    this.packet = packet;
+    this.size = 8 + Math.random() * 4;
+    this.rotation = (Math.random() - 0.5) * 0.6;
+    this.createdAt = Date.now();
+    this.lifetime = 8000 + Math.random() * 4000; // 8-12s
+    this.opacity = 0.85;
+  }
+
+  update() {
+    const age = Date.now() - this.createdAt;
+    if (age > this.lifetime - 2000) {
+      // Fade out in last 2 seconds
+      this.opacity = Math.max(0, 0.85 * (1 - (age - (this.lifetime - 2000)) / 2000));
+    }
+    return age < this.lifetime;
+  }
+
+  draw(ctx) {
+    const w = this.size, h = w * 0.68;
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+
+    // Crumpled envelope
+    ctx.fillStyle = '#1a0808';
+    ctx.strokeStyle = this.color + '80';
+    ctx.lineWidth = 1;
+    rrect(ctx, -w / 2, -h / 2, w, h, 1);
+    ctx.fill();
+    ctx.stroke();
+
+    // X mark
+    ctx.strokeStyle = '#ef444460';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w / 4, -h / 4);
+    ctx.lineTo(w / 4, h / 4);
+    ctx.moveTo(w / 4, -h / 4);
+    ctx.lineTo(-w / 4, h / 4);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  hit(px, py) {
+    return Math.abs(px - this.x) <= this.size && Math.abs(py - this.y) <= this.size * 0.7;
+  }
+}
+
+// ── Spark particle (impact effect) ──
+class Spark {
+  constructor(x, y, color) {
+    this.x = x;
+    this.y = y;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 3;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.color = color;
+    this.size = 2 + Math.random() * 2;
+    this.life = 1;
+    this.decay = 0.03 + Math.random() * 0.03;
+    this.alive = true;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.08;
+    this.vx *= 0.97;
+    this.life -= this.decay;
+    if (this.life <= 0) this.alive = false;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = this.life;
+    ctx.fillStyle = this.color;
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 // ── Packet envelope entity ──
@@ -407,11 +556,13 @@ class PacketEnvelope {
     this.speed = 0.006 + Math.random() * 0.005;
     this.alive = true;
     this.bouncing = false;
+    this.settled = false; // becomes debris
     this.bvx = 0;
     this.bvy = 0;
     this.x = 0;
     this.y = 0;
     this.dmap = dmap;
+    this.impactSpawned = false;
     this._pos();
   }
 
@@ -431,11 +582,19 @@ class PacketEnvelope {
     if (this.bouncing) {
       this.x += this.bvx;
       this.y += this.bvy;
-      this.bvy += 0.3;
-      this.bvx *= 0.96;
-      this.opacity -= 0.02;
-      this.size = Math.max(4, this.size - 0.1);
-      if (this.opacity <= 0) this.alive = false;
+      this.bvy += 0.25;
+      this.bvx *= 0.95;
+      this.opacity -= 0.015;
+      this.size = Math.max(5, this.size - 0.08);
+      // When slowed enough, settle as debris
+      if (Math.abs(this.bvx) < 0.3 && Math.abs(this.bvy) < 0.5 && this.bvy > 0) {
+        this.settled = true;
+        this.alive = false;
+      }
+      if (this.opacity <= 0) {
+        this.settled = true;
+        this.alive = false;
+      }
       return;
     }
     this.progress += this.speed;
@@ -444,11 +603,22 @@ class PacketEnvelope {
       this.progress = 0;
       if (this.packet.blocked && this.segIdx >= this.route.length - 1) {
         this.bouncing = true;
-        const a = -Math.PI / 3 + Math.random() * (-Math.PI / 3);
-        const sp = 2 + Math.random() * 3;
-        this.bvx = Math.cos(a) * sp * (Math.random() > 0.5 ? 1 : -1);
-        this.bvy = Math.sin(a) * sp - 2;
-        this.size = 20;
+        this.impactSpawned = false;
+        // Bounce away from the blocking device
+        const blockDev = this.dmap[this.route[this.route.length - 1]];
+        const prevDev = this.dmap[this.route[this.route.length - 2]];
+        if (blockDev && prevDev) {
+          // Bounce direction: away from target, biased downward
+          const dx = prevDev.x - blockDev.x;
+          const dy = prevDev.y - blockDev.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          this.bvx = (dx / dist) * (1.5 + Math.random() * 2);
+          this.bvy = Math.abs(dy / dist) * 0.5 + 1 + Math.random() * 1.5; // bias downward
+        } else {
+          this.bvx = (Math.random() - 0.5) * 3;
+          this.bvy = 1 + Math.random() * 2;
+        }
+        this.size = 18;
         return;
       }
       if (this.segIdx >= this.route.length - 1) {
@@ -492,6 +662,8 @@ function PacketParticles({ packets, onParticleClick }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const envRef = useRef([]);
+  const debrisRef = useRef([]);
+  const sparksRef = useRef([]);
   const idRef = useRef(0);
   const prevLenRef = useRef(0);
   const animRef = useRef(null);
@@ -616,13 +788,53 @@ function PacketParticles({ packets, onParticleClick }) {
         }
       });
 
-      // Envelopes
-      envRef.current = envRef.current.filter(e => e.alive);
-      envRef.current.forEach(e => {
+      // Debris (piled up dropped packets) — draw UNDER envelopes
+      debrisRef.current = debrisRef.current.filter(d => d.update());
+      debrisRef.current.forEach(d => d.draw(ctx));
+
+      // Debris count label near pile
+      if (debrisRef.current.length > 0) {
+        ctx.font = 'bold 10px monospace';
+        ctx.fillStyle = '#ef4444cc';
+        ctx.textAlign = 'center';
+        // Find average position of recent debris
+        const recent = debrisRef.current.slice(-20);
+        const ax = recent.reduce((s, d) => s + d.x, 0) / recent.length;
+        const ay = Math.min(...recent.map(d => d.y)) - 10;
+        ctx.fillText(`${debrisRef.current.length} dropped`, ax, ay);
+      }
+
+      // Update envelopes — spawn debris + sparks when settled
+      envRef.current = envRef.current.filter(e => {
         e.dmap = dp;
         e.update();
-        e.draw(ctx);
+
+        // Spawn sparks on first bounce frame
+        if (e.bouncing && !e.impactSpawned) {
+          e.impactSpawned = true;
+          for (let i = 0; i < 8; i++) {
+            sparksRef.current.push(new Spark(e.x, e.y, e.color));
+          }
+        }
+
+        // Convert to debris when settled
+        if (e.settled) {
+          debrisRef.current.push(new Debris(e.x, e.y, e.color, e.packet));
+          // Cap debris
+          if (debrisRef.current.length > 60) {
+            debrisRef.current = debrisRef.current.slice(-50);
+          }
+          return false;
+        }
+
+        return e.alive;
       });
+
+      envRef.current.forEach(e => e.draw(ctx));
+
+      // Sparks
+      sparksRef.current = sparksRef.current.filter(s => { s.update(); return s.alive; });
+      sparksRef.current.forEach(s => s.draw(ctx));
 
       // Legend
       drawLegend(ctx, w, h);
@@ -667,10 +879,20 @@ function PacketParticles({ packets, onParticleClick }) {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Check envelopes first (moving packets)
     for (let i = envRef.current.length - 1; i >= 0; i--) {
       if (envRef.current[i].hit(x, y)) {
         if (onParticleClick) {
           onParticleClick(envRef.current[i].packet, { x: e.clientX, y: e.clientY });
+        }
+        return;
+      }
+    }
+    // Check debris (dropped packets pile)
+    for (let i = debrisRef.current.length - 1; i >= 0; i--) {
+      if (debrisRef.current[i].hit(x, y)) {
+        if (onParticleClick) {
+          onParticleClick(debrisRef.current[i].packet, { x: e.clientX, y: e.clientY });
         }
         return;
       }

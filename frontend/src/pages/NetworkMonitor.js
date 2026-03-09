@@ -22,8 +22,7 @@ function NetworkMonitor() {
   const [capturing, setCapturing] = useState(true);
   const [filter, setFilter] = useState({ method: '', path: '', statusMin: '', statusMax: '' });
   const [activeTab, setActiveTab] = useState('xray');
-  const [topoView, setTopoView] = useState('particles'); // 'particles' or 'graph'
-  const [terminalMode, setTerminalMode] = useState(false);
+  const [topoView, setTopoView] = useState('particles');
   const redCommandRef = useRef(null);
   const blueCommandRef = useRef(null);
 
@@ -37,7 +36,6 @@ function NetworkMonitor() {
   }, []);
 
   const handleSendCommand = useCallback((cmd) => {
-    // Send attack commands to Red Team terminal
     if (redCommandRef.current) {
       redCommandRef.current(cmd);
       setActiveTab('terminal');
@@ -71,14 +69,12 @@ function NetworkMonitor() {
                 <button
                   className={`topo-btn ${topoView === 'particles' ? 'active' : ''}`}
                   onClick={() => setTopoView('particles')}
-                  title="Particle view"
                 >
-                  Particles
+                  Simulation
                 </button>
                 <button
                   className={`topo-btn ${topoView === 'graph' ? 'active' : ''}`}
                   onClick={() => setTopoView('graph')}
-                  title="Graph view"
                 >
                   Graph
                 </button>
@@ -98,13 +94,10 @@ function NetworkMonitor() {
             )}
           </div>
 
-          <DDoSControl
-            onSendCommand={handleSendCommand}
-            terminalMode={terminalMode}
-          />
+          <DDoSControl onSendCommand={handleSendCommand} />
         </div>
 
-        {/* Right: Packets / Terminal (tabs) */}
+        {/* Right: X-ray / Packets / Terminal */}
         <div className="nm-right">
           <div className="nm-tabs">
             <button
@@ -117,13 +110,13 @@ function NetworkMonitor() {
               className={`nm-tab ${activeTab === 'packets' ? 'active' : ''}`}
               onClick={() => setActiveTab('packets')}
             >
-              Packet Analysis
+              Packets
             </button>
             <button
               className={`nm-tab ${activeTab === 'terminal' ? 'active' : ''}`}
               onClick={() => setActiveTab('terminal')}
             >
-              Red / Blue Terminal
+              Terminal
             </button>
 
             {activeTab === 'xray' && (
@@ -145,19 +138,6 @@ function NetworkMonitor() {
                   Clear
                 </button>
                 <span className="packet-count">{packets.length} packets</span>
-              </div>
-            )}
-
-            {activeTab === 'terminal' && (
-              <div className="tab-actions">
-                <label className="mode-toggle">
-                  <input
-                    type="checkbox"
-                    checked={terminalMode}
-                    onChange={e => setTerminalMode(e.target.checked)}
-                  />
-                  <span>Terminal Mode</span>
-                </label>
               </div>
             )}
           </div>
@@ -204,7 +184,6 @@ function NetworkMonitor() {
         </div>
       </div>
 
-      {/* Particle Inspector Popup */}
       {inspectedPacket && (
         <ParticleInspector
           packet={inspectedPacket}
