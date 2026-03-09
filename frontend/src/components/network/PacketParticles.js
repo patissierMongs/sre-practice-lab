@@ -1,52 +1,216 @@
-import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 
 /**
- * Canvas-based particle system for packet visualization on topology.
+ * Packet Tracer Simulation Mode
  *
- * Each packet = a particle that travels along edges.
- * Blocked packets bounce/deflect off the blocking node.
- * Click a particle to inspect its payload.
+ * Cisco Packet Tracer style: device icons connected by wires,
+ * packets rendered as envelopes traveling along connections.
+ * Click an envelope to inspect PDU details at each layer.
  */
 
-// Node positions (must match TopologyMap POSITIONS)
-const NODE_POSITIONS = {
-  'traffic-generator': { x: 60, y: 180 },
-  'nginx':             { x: 310, y: 180 },
-  'frontend':          { x: 560, y: 80 },
-  'backend':           { x: 560, y: 280 },
-  'postgres':          { x: 810, y: 230 },
-  'redis':             { x: 810, y: 330 },
-};
+// ── Device definitions (positions are in 0-1 normalized coords) ──
+const DEVICES = [
+  { id: 'traffic-gen', name: 'Traffic\nGenerator', type: 'cloud',   nx: 0.06, ny: 0.40 },
+  { id: 'nginx',       name: 'Nginx',              type: 'server',  nx: 0.30, ny: 0.40 },
+  { id: 'frontend',    name: 'Frontend',            type: 'desktop', nx: 0.54, ny: 0.15 },
+  { id: 'backend',     name: 'Backend',             type: 'server',  nx: 0.54, ny: 0.65 },
+  { id: 'postgres',    name: 'PostgreSQL',          type: 'db',      nx: 0.82, ny: 0.50 },
+  { id: 'redis',       name: 'Redis',               type: 'db',      nx: 0.82, ny: 0.82 },
+  { id: 'prometheus',  name: 'Prometheus',           type: 'monitor', nx: 0.30, ny: 0.85 },
+  { id: 'grafana',     name: 'Grafana',              type: 'monitor', nx: 0.06, ny: 0.85 },
+];
 
-// Colors
-const STATUS_COLORS = {
-  pass: '#66bb6a',
-  blocked: '#ef5350',
-  error: '#ff9800',
-  warn: '#ffb74d',
-};
+const LINKS = [
+  ['traffic-gen', 'nginx'],
+  ['nginx', 'frontend'],
+  ['nginx', 'backend'],
+  ['backend', 'postgres'],
+  ['backend', 'redis'],
+  ['backend', 'prometheus'],
+  ['prometheus', 'grafana'],
+];
 
-function getParticleColor(packet) {
-  if (packet.blocked) return STATUS_COLORS.blocked;
-  if (packet.status_code >= 500) return STATUS_COLORS.error;
-  if (packet.status_code >= 400) return STATUS_COLORS.warn;
-  return STATUS_COLORS.pass;
+// ── Device icon drawing ──
+function drawDeviceIcon(ctx, type, x, y, w) {
+  const h = w;
+  ctx.save();
+
+  switch (type) {
+    case 'server': {
+      // Rack server icon
+      const rw = w * 0.8, rh = h * 0.9;
+      const rx = x - rw / 2, ry = y - rh / 2;
+      ctx.fillStyle = '#1e3a5f';
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, rx, ry, rw, rh, 4);
+      ctx.fill();
+      ctx.stroke();
+      // Slots
+      for (let i = 0; i < 3; i++) {
+        const sy = ry + 6 + i * (rh / 3.5);
+        ctx.fillStyle = '#0f2440';
+        ctx.fillRect(rx + 4, sy, rw - 8, rh / 5);
+        ctx.fillStyle = i === 0 ? '#22c55e' : '#3b82f6';
+        ctx.beginPath();
+        ctx.arc(rx + rw - 8, sy + rh / 10, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'db': {
+      // Database cylinder
+      const cw = w * 0.6, ch = h * 0.85;
+      const cx = x, cy = y;
+      ctx.fillStyle = '#1a3a2a';
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = 1.5;
+      // Body
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - ch / 3, cw / 2, ch / 6, 0, Math.PI, 0);
+      ctx.lineTo(cx + cw / 2, cy + ch / 4);
+      ctx.ellipse(cx, cy + ch / 4, cw / 2, ch / 6, 0, 0, Math.PI);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Top ellipse
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - ch / 3, cw / 2, ch / 6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#245238';
+      ctx.fill();
+      ctx.stroke();
+      break;
+    }
+    case 'cloud': {
+      // Cloud shape
+      ctx.fillStyle = '#2d1f3d';
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x - w * 0.15, y, w * 0.25, 0, Math.PI * 2);
+      ctx.arc(x + w * 0.15, y, w * 0.25, 0, Math.PI * 2);
+      ctx.arc(x, y - h * 0.12, w * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    }
+    case 'desktop': {
+      // Monitor
+      const mw = w * 0.7, mh = h * 0.55;
+      ctx.fillStyle = '#1e293b';
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, x - mw / 2, y - mh / 2 - 4, mw, mh, 3);
+      ctx.fill();
+      ctx.stroke();
+      // Screen glow
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(x - mw / 2 + 3, y - mh / 2 - 1, mw - 6, mh - 6);
+      // Stand
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(x - 3, y + mh / 2 - 4, 6, 8);
+      ctx.fillRect(x - 10, y + mh / 2 + 3, 20, 3);
+      break;
+    }
+    case 'monitor': {
+      // Dashboard/gauge
+      const mr = w * 0.35;
+      ctx.fillStyle = '#1a1a2e';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, mr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Gauge needle
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + mr * 0.6, y - mr * 0.3);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      break;
+    }
+    default:
+      ctx.fillStyle = '#21262d';
+      ctx.beginPath();
+      ctx.arc(x, y, w * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+  }
+  ctx.restore();
 }
 
-// Determine the route (sequence of node names) a packet takes
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ── Envelope (packet) drawing ──
+function drawEnvelope(ctx, x, y, color, size, blocked) {
+  const w = size, h = size * 0.7;
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 6;
+
+  // Envelope body
+  ctx.fillStyle = blocked ? '#3a1515' : '#1a2233';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x - w / 2, y - h / 2, w, h, 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Envelope flap (triangle)
+  ctx.beginPath();
+  ctx.moveTo(x - w / 2, y - h / 2);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + w / 2, y - h / 2);
+  ctx.strokeStyle = color + '88';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Blocked X overlay
+  if (blocked) {
+    ctx.strokeStyle = '#ef5350';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 3, y - h / 3);
+    ctx.lineTo(x + w / 3, y + h / 3);
+    ctx.moveTo(x + w / 3, y - h / 3);
+    ctx.lineTo(x - w / 3, y + h / 3);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ── Packet route logic ──
 function getRoute(packet) {
   const path = packet.path || '';
   const layer = packet.layer || '';
 
   if (layer === 'nginx') {
-    const route = ['traffic-generator', 'nginx'];
+    const route = ['traffic-gen', 'nginx'];
     if (!packet.blocked) {
       route.push(path.startsWith('/api') ? 'backend' : 'frontend');
     }
     return route;
   }
 
-  // application layer
   const route = ['nginx', 'backend'];
   if (!packet.blocked && (path.includes('/posts') || path.includes('/users') || path.includes('/health/ready'))) {
     route.push('postgres');
@@ -54,85 +218,84 @@ function getRoute(packet) {
   return route;
 }
 
-class Particle {
-  constructor(packet, route, id) {
+function getEnvelopeColor(packet) {
+  if (packet.blocked) return '#ef5350';
+  if (packet.status_code >= 500) return '#ff9800';
+  if (packet.status_code >= 400) return '#ffb74d';
+  return '#4fc3f7';
+}
+
+// ── Packet envelope entity ──
+class PacketEnvelope {
+  constructor(packet, route, id, deviceMap) {
     this.id = id;
     this.packet = packet;
     this.route = route;
-    this.color = getParticleColor(packet);
-    this.radius = 5;
+    this.color = getEnvelopeColor(packet);
+    this.size = 14;
     this.opacity = 1;
-    this.progress = 0;       // 0..1 along current segment
-    this.segmentIdx = 0;     // which segment of the route
-    this.speed = 0.012 + Math.random() * 0.008; // vary speed slightly
+    this.progress = 0;
+    this.segmentIdx = 0;
+    this.speed = 0.008 + Math.random() * 0.006;
     this.alive = true;
-    this.bouncing = false;   // true when deflecting after drop
+    this.bouncing = false;
     this.bounceVx = 0;
     this.bounceVy = 0;
     this.x = 0;
     this.y = 0;
-    this.trail = [];         // position history for trail effect
+    this.deviceMap = deviceMap;
     this._updatePosition();
+  }
+
+  _getDevicePos(id) {
+    return this.deviceMap[id] || { x: 0, y: 0 };
   }
 
   _updatePosition() {
     if (this.bouncing) return;
+    const from = this._getDevicePos(this.route[this.segmentIdx]);
+    const to = this._getDevicePos(this.route[this.segmentIdx + 1]);
+    if (!from || !to) { this.alive = false; return; }
 
-    const from = NODE_POSITIONS[this.route[this.segmentIdx]];
-    const to = NODE_POSITIONS[this.route[this.segmentIdx + 1]];
-    if (!from || !to) {
-      this.alive = false;
-      return;
-    }
-
-    // Bezier-like curve for visual appeal
     const t = this.progress;
-    const midX = (from.x + to.x) / 2;
-    const midY = (from.y + to.y) / 2 - 30; // slight arc upward
-
-    this.x = (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * midX + t * t * to.x;
-    this.y = (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * midY + t * t * to.y;
+    // Slight vertical offset so packets don't overlap the wire
+    const offsetY = (this.id % 2 === 0 ? -8 : 8);
+    this.x = from.x + (to.x - from.x) * t;
+    this.y = from.y + (to.y - from.y) * t + offsetY * Math.sin(t * Math.PI);
   }
 
   update() {
     if (!this.alive) return;
 
     if (this.bouncing) {
-      // Physics: apply velocity + gravity + friction
       this.x += this.bounceVx;
       this.y += this.bounceVy;
-      this.bounceVy += 0.3;   // gravity
-      this.bounceVx *= 0.98;  // friction
-      this.opacity -= 0.015;
-      this.radius = Math.max(1, this.radius - 0.05);
-
-      if (this.opacity <= 0) {
-        this.alive = false;
-      }
+      this.bounceVy += 0.25;
+      this.bounceVx *= 0.97;
+      this.opacity -= 0.018;
+      this.size = Math.max(4, this.size - 0.08);
+      if (this.opacity <= 0) this.alive = false;
       return;
     }
-
-    // Save trail
-    this.trail.push({ x: this.x, y: this.y });
-    if (this.trail.length > 8) this.trail.shift();
 
     this.progress += this.speed;
 
     if (this.progress >= 1) {
-      // Arrived at next node
       this.segmentIdx++;
       this.progress = 0;
 
-      // Check if blocked at this node (bounce!)
       if (this.packet.blocked && this.segmentIdx >= this.route.length - 1) {
-        this._startBounce();
+        this.bouncing = true;
+        const angle = -Math.PI / 3 + Math.random() * (-Math.PI / 3);
+        const spd = 2.5 + Math.random() * 3;
+        this.bounceVx = Math.cos(angle) * spd * (Math.random() > 0.5 ? 1 : -1);
+        this.bounceVy = Math.sin(angle) * spd - 2;
+        this.size = 18;
         return;
       }
 
-      // Check if route is complete
       if (this.segmentIdx >= this.route.length - 1) {
-        // Fade out at destination
-        this.opacity -= 0.05;
+        this.opacity -= 0.08;
         if (this.opacity <= 0) this.alive = false;
         return;
       }
@@ -141,75 +304,70 @@ class Particle {
     this._updatePosition();
   }
 
-  _startBounce() {
-    this.bouncing = true;
-    // Random deflection direction
-    const angle = (-Math.PI / 4) + Math.random() * (-Math.PI / 2); // upward-ish
-    const speed = 3 + Math.random() * 4;
-    this.bounceVx = Math.cos(angle) * speed * (Math.random() > 0.5 ? 1 : -1);
-    this.bounceVy = Math.sin(angle) * speed - 2; // initial upward velocity
-    this.radius = 7; // brief enlarge on bounce
-  }
-
   draw(ctx) {
     if (!this.alive) return;
-
-    // Trail
-    if (this.trail.length > 1 && !this.bouncing) {
-      ctx.beginPath();
-      ctx.moveTo(this.trail[0].x, this.trail[0].y);
-      for (let i = 1; i < this.trail.length; i++) {
-        ctx.lineTo(this.trail[i].x, this.trail[i].y);
-      }
-      ctx.strokeStyle = this.color + '44';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    // Glow
     ctx.save();
     ctx.globalAlpha = this.opacity;
-    ctx.shadowColor = this.color;
-    ctx.shadowBlur = this.bouncing ? 15 : 8;
-
-    // Main circle
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-    ctx.fillStyle = this.color;
-    ctx.fill();
-
-    // Bounce: X mark
-    if (this.bouncing) {
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      const s = this.radius;
-      ctx.beginPath();
-      ctx.moveTo(this.x - s, this.y - s);
-      ctx.lineTo(this.x + s, this.y + s);
-      ctx.moveTo(this.x + s, this.y - s);
-      ctx.lineTo(this.x - s, this.y + s);
-      ctx.stroke();
-    }
-
+    drawEnvelope(ctx, this.x, this.y, this.color, this.size, this.packet.blocked && this.bouncing);
     ctx.restore();
   }
 
-  // Hit test for click
   containsPoint(px, py) {
-    const dx = px - this.x;
-    const dy = py - this.y;
-    return dx * dx + dy * dy <= (this.radius + 4) * (this.radius + 4);
+    return Math.abs(px - this.x) <= this.size && Math.abs(py - this.y) <= this.size * 0.7;
   }
 }
 
-function PacketParticles({ packets, width = 900, height = 500, onParticleClick }) {
+// ═══════════════════════════════════
+// Main Component
+// ═══════════════════════════════════
+function PacketParticles({ packets, onParticleClick }) {
+  const containerRef = useRef(null);
   const canvasRef = useRef(null);
-  const particlesRef = useRef([]);
+  const envelopesRef = useRef([]);
   const idCounterRef = useRef(0);
   const prevPacketLenRef = useRef(0);
   const animFrameRef = useRef(null);
+  const sizeRef = useRef({ w: 600, h: 400 });
+  const devicePosRef = useRef({});
 
-  // Add new particles when packets arrive
+  // Compute device positions from container size
+  const computePositions = useCallback(() => {
+    const w = sizeRef.current.w;
+    const h = sizeRef.current.h;
+    const map = {};
+    DEVICES.forEach(d => {
+      map[d.id] = { x: d.nx * w, y: d.ny * h };
+    });
+    devicePosRef.current = map;
+  }, []);
+
+  // Resize observer
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const canvas = canvasRef.current;
+
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          const dpr = window.devicePixelRatio || 1;
+          sizeRef.current = { w: width, h: height };
+          canvas.width = width * dpr;
+          canvas.height = height * dpr;
+          canvas.style.width = width + 'px';
+          canvas.style.height = height + 'px';
+          const ctx = canvas.getContext('2d');
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          computePositions();
+        }
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [computePositions]);
+
+  // Add envelopes when packets arrive
   useEffect(() => {
     if (!packets || packets.length === 0) return;
     if (packets.length <= prevPacketLenRef.current) {
@@ -217,20 +375,20 @@ function PacketParticles({ packets, width = 900, height = 500, onParticleClick }
       return;
     }
 
-    const newPackets = packets.slice(prevPacketLenRef.current);
+    const newPkts = packets.slice(prevPacketLenRef.current);
     prevPacketLenRef.current = packets.length;
 
-    newPackets.forEach(pkt => {
+    newPkts.forEach(pkt => {
       const route = getRoute(pkt);
       if (route.length < 2) return;
       idCounterRef.current++;
-      const p = new Particle(pkt, route, idCounterRef.current);
-      particlesRef.current.push(p);
+      envelopesRef.current.push(
+        new PacketEnvelope(pkt, route, idCounterRef.current, devicePosRef.current)
+      );
     });
 
-    // Cap max particles
-    if (particlesRef.current.length > 200) {
-      particlesRef.current = particlesRef.current.slice(-150);
+    if (envelopesRef.current.length > 150) {
+      envelopesRef.current = envelopesRef.current.slice(-100);
     }
   }, [packets]);
 
@@ -241,50 +399,58 @@ function PacketParticles({ packets, width = 900, height = 500, onParticleClick }
     const ctx = canvas.getContext('2d');
 
     function animate() {
-      ctx.clearRect(0, 0, width, height);
+      const { w, h } = sizeRef.current;
+      ctx.clearRect(0, 0, w, h);
 
-      // Draw node labels (subtle)
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      Object.entries(NODE_POSITIONS).forEach(([name, pos]) => {
-        ctx.fillStyle = '#484f5866';
-        ctx.fillText(name, pos.x, pos.y + 20);
+      const devPos = devicePosRef.current;
+      const iconSize = Math.max(28, Math.min(w, h) * 0.07);
 
-        // Node dot
+      // ── Draw wires ──
+      LINKS.forEach(([a, b]) => {
+        const from = devPos[a];
+        const to = devPos[b];
+        if (!from || !to) return;
+
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#30363d';
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Subtle direction indicator (small dot at midpoint)
+        const mx = (from.x + to.x) / 2;
+        const my = (from.y + to.y) / 2;
+        ctx.beginPath();
+        ctx.arc(mx, my, 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#334155';
         ctx.fill();
       });
 
-      // Draw edge lines (very subtle)
-      ctx.strokeStyle = '#21262d';
-      ctx.lineWidth = 1;
-      const edgePairs = [
-        ['traffic-generator', 'nginx'],
-        ['nginx', 'frontend'],
-        ['nginx', 'backend'],
-        ['backend', 'postgres'],
-        ['backend', 'redis'],
-      ];
-      edgePairs.forEach(([a, b]) => {
-        const from = NODE_POSITIONS[a];
-        const to = NODE_POSITIONS[b];
-        if (from && to) {
-          ctx.beginPath();
-          ctx.setLineDash([4, 4]);
-          ctx.moveTo(from.x, from.y);
-          ctx.lineTo(to.x, to.y);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+      // ── Draw devices ──
+      DEVICES.forEach(dev => {
+        const pos = devPos[dev.id];
+        if (!pos) return;
+
+        drawDeviceIcon(ctx, dev.type, pos.x, pos.y, iconSize);
+
+        // Label
+        ctx.font = `${Math.max(9, iconSize * 0.32)}px -apple-system, sans-serif`;
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'center';
+        const lines = dev.name.split('\n');
+        lines.forEach((line, i) => {
+          ctx.fillText(line, pos.x, pos.y + iconSize / 2 + 12 + i * 12);
+        });
       });
 
-      // Update & draw particles
-      particlesRef.current = particlesRef.current.filter(p => p.alive);
-      particlesRef.current.forEach(p => {
-        p.update();
-        p.draw(ctx);
+      // ── Update & draw envelopes ──
+      envelopesRef.current = envelopesRef.current.filter(e => e.alive);
+      envelopesRef.current.forEach(e => {
+        // Update device map reference for responsive positions
+        e.deviceMap = devPos;
+        e.update();
+        e.draw(ctx);
       });
 
       animFrameRef.current = requestAnimationFrame(animate);
@@ -294,37 +460,37 @@ function PacketParticles({ packets, width = 900, height = 500, onParticleClick }
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [width, height]);
+  }, []);
 
   // Click handler
   const handleClick = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (width / rect.width);
-    const y = (e.clientY - rect.top) * (height / rect.height);
+    const dpr = window.devicePixelRatio || 1;
+    const x = (e.clientX - rect.left);
+    const y = (e.clientY - rect.top);
 
-    // Find clicked particle (reverse order = topmost first)
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const p = particlesRef.current[i];
-      if (p.containsPoint(x, y)) {
+    for (let i = envelopesRef.current.length - 1; i >= 0; i--) {
+      const env = envelopesRef.current[i];
+      if (env.containsPoint(x, y)) {
         if (onParticleClick) {
-          onParticleClick(p.packet, { x: e.clientX, y: e.clientY });
+          onParticleClick(env.packet, { x: e.clientX, y: e.clientY });
         }
         return;
       }
     }
-  }, [onParticleClick, width, height]);
+  }, [onParticleClick]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      onClick={handleClick}
-      className="packet-particles-canvas"
-      style={{ cursor: 'crosshair' }}
-    />
+    <div ref={containerRef} className="packet-sim-container">
+      <canvas
+        ref={canvasRef}
+        onClick={handleClick}
+        className="packet-sim-canvas"
+        style={{ cursor: 'crosshair' }}
+      />
+    </div>
   );
 }
 

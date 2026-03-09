@@ -93,8 +93,6 @@ function NetworkMonitor() {
             ) : (
               <PacketParticles
                 packets={packets}
-                width={900}
-                height={460}
                 onParticleClick={handleParticleClick}
               />
             )}
