@@ -27,6 +27,8 @@ class Packet:
     block_reason: str = ""
     layer: str = "application"  # "nginx" or "application"
     size_bytes: int = 0
+    attack_type: str = "normal"  # "normal", "xss", "sqli", "ddos"
+    has_db: bool = False  # whether this request actually accessed the database
 
     def to_dict(self):
         return asdict(self)

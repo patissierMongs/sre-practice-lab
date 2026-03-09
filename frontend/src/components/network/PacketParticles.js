@@ -411,33 +411,29 @@ function drawEnvelope(ctx, x, y, color, size, blocked) {
 }
 
 // ── Packet route determination ──
+// Uses actual packet metadata from kernel/middleware tracing — not path guessing
 function isAttack(packet) {
-  return packet.blocked || packet.attack_type === 'xss' || packet.attack_type === 'sqli'
-    || packet.attack_type === 'ddos' || (packet.status_code && packet.status_code === 429);
+  const at = packet.attack_type || '';
+  return (at !== 'normal' && at !== '') || packet.blocked || packet.status_code === 429;
 }
 
-function getRoute(packet) {
-  const path = packet.path || '';
-  const layer = packet.layer || '';
-  const attack = isAttack(packet);
-  const origin = attack ? 'attacker' : 'client';
+function getRequestRoute(packet) {
+  const origin = isAttack(packet) ? 'attacker' : 'client';
 
-  if (layer === 'nginx') {
-    const route = [origin, 'internet', 'nginx'];
-    if (!packet.blocked) {
-      route.push(path.startsWith('/api') ? 'backend' : 'frontend');
-    }
+  // Request route (outbound)
+  const route = [origin, 'internet', 'nginx'];
+
+  if (packet.blocked) {
+    // Blocked at nginx (rate limit / firewall) — stops here
     return route;
   }
 
-  const route = [origin, 'internet', 'nginx', 'backend'];
+  // Passed nginx → backend
+  route.push('backend');
 
-  // SQLi attacks that aren't blocked reach the DB
-  const dbPath = path.includes('/posts') || path.includes('/users') || path.includes('/health');
-  if (dbPath || packet.attack_type === 'sqli') {
-    if (!packet.blocked) {
-      route.push('postgres');
-    }
+  // Only show DB hop if backend confirmed DB access via trace
+  if (packet.has_db) {
+    route.push('postgres');
   }
 
   return route;
@@ -448,6 +444,12 @@ function getColor(packet) {
   if (packet.status_code >= 500) return '#f97316';
   if (packet.status_code >= 400) return '#eab308';
   return '#22d3ee';
+}
+
+function getResponseColor(packet) {
+  if (packet.status_code >= 500) return '#f97316';
+  if (packet.status_code >= 400) return '#eab308';
+  return '#34d399'; // green for response
 }
 
 // ── Debris: dropped packets that pile up ──
@@ -544,12 +546,13 @@ class Spark {
 
 // ── Packet envelope entity ──
 class PacketEnvelope {
-  constructor(packet, route, id, dmap) {
+  constructor(packet, route, id, dmap, isResponse = false) {
     this.id = id;
     this.packet = packet;
     this.route = route;
-    this.color = getColor(packet);
-    this.size = 16;
+    this.isResponse = isResponse;
+    this.color = isResponse ? getResponseColor(packet) : getColor(packet);
+    this.size = isResponse ? 13 : 16;
     this.opacity = 1;
     this.progress = 0;
     this.segIdx = 0;
@@ -634,7 +637,29 @@ class PacketEnvelope {
     if (!this.alive) return;
     ctx.save();
     ctx.globalAlpha = this.opacity;
-    drawEnvelope(ctx, this.x, this.y, this.color, this.size, this.packet.blocked && this.bouncing);
+    if (this.isResponse) {
+      // Response: smaller, filled circle with arrow ← (simpler shape)
+      const r = this.size * 0.4;
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      // Arrow inside
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#0b1120';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(this.x + r * 0.4, this.y);
+      ctx.lineTo(this.x - r * 0.3, this.y);
+      ctx.moveTo(this.x - r * 0.1, this.y - r * 0.35);
+      ctx.lineTo(this.x - r * 0.3, this.y);
+      ctx.lineTo(this.x - r * 0.1, this.y + r * 0.35);
+      ctx.stroke();
+    } else {
+      drawEnvelope(ctx, this.x, this.y, this.color, this.size, this.packet.blocked && this.bouncing);
+    }
     ctx.restore();
   }
 
@@ -714,14 +739,23 @@ function PacketParticles({ packets, onParticleClick }) {
     prevLenRef.current = packets.length;
 
     fresh.forEach(pkt => {
-      const route = getRoute(pkt);
-      if (route.length < 2) return;
+      const reqRoute = getRequestRoute(pkt);
+      if (reqRoute.length < 2) return;
+
+      // Request envelope (outbound)
       idRef.current++;
-      envRef.current.push(new PacketEnvelope(pkt, route, idRef.current, dposRef.current));
+      envRef.current.push(new PacketEnvelope(pkt, reqRoute, idRef.current, dposRef.current, false));
+
+      // Response envelope (return trip) — only if not blocked
+      if (!pkt.blocked) {
+        idRef.current++;
+        const respRoute = [...reqRoute].reverse();
+        envRef.current.push(new PacketEnvelope(pkt, respRoute, idRef.current, dposRef.current, true));
+      }
     });
 
-    if (envRef.current.length > 150) {
-      envRef.current = envRef.current.slice(-100);
+    if (envRef.current.length > 200) {
+      envRef.current = envRef.current.slice(-150);
     }
   }, [packets]);
 
@@ -851,7 +885,8 @@ function PacketParticles({ packets, onParticleClick }) {
     const lx = 12, ly = h - 14;
     ctx.font = '10px monospace';
     const items = [
-      { color: '#22d3ee', label: 'Normal' },
+      { color: '#22d3ee', label: 'Request' },
+      { color: '#34d399', label: 'Response' },
       { color: '#ef4444', label: 'Blocked' },
       { color: '#f97316', label: '5xx' },
       { color: '#eab308', label: '4xx' },

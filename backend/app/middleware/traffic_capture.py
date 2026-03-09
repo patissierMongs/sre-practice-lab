@@ -126,17 +126,19 @@ class TrafficCaptureMiddleware(BaseHTTPMiddleware):
             metadata={"status_code": response.status_code},
         ))
 
-        # Layer: Database (heuristic - if path involves DB)
-        if any(p in path for p in ["/posts", "/users", "/health/ready"]):
+        # Layer: Database (only if handler actually did DB work — confirmed by path + success)
+        has_db = False
+        if response.status_code < 400 and any(p in path for p in ["/posts", "/users"]):
             op = {"GET": "SELECT", "POST": "INSERT", "PUT": "UPDATE", "DELETE": "DELETE"}.get(method, "SELECT")
             table = "posts" if "posts" in path else "users"
             trace_store.add_layer(trace_id, TraceLayer(
                 layer="database", action=op,
-                result="committed" if response.status_code < 400 else "error",
+                result="committed",
                 duration_ms=round(handler_ms * 0.4, 3),
                 detail=f"{op} on {table} via SQLAlchemy",
                 metadata={"table": table, "operation": op},
             ))
+            has_db = True
 
         # Layer: Rate limit (if 429)
         if response.status_code == 429:
@@ -164,6 +166,12 @@ class TrafficCaptureMiddleware(BaseHTTPMiddleware):
             media_type=response.media_type,
         )
 
+        # ═══ X-ray Trace 완료 — detect attack type before building packet ═══
+        await trace_store.complete_trace(trace_id, response.status_code, round(elapsed, 2))
+        # Get attack type from completed trace
+        completed_trace = trace_store.get_trace(trace_id)
+        attack_type = completed_trace.get("attack_type", "normal") if completed_trace else "normal"
+
         packet = Packet(
             timestamp=timestamp, source_ip=source_ip, source_port=source_port,
             dest_service="backend", dest_port=8000, method=method, path=path,
@@ -174,10 +182,8 @@ class TrafficCaptureMiddleware(BaseHTTPMiddleware):
             blocked=response.status_code == 429,
             block_reason="rate_limit" if response.status_code == 429 else "",
             layer="application", size_bytes=size_bytes,
+            attack_type=attack_type, has_db=has_db,
         )
         await packet_store.add_packet(packet)
-
-        # ═══ X-ray Trace 완료 ═══
-        await trace_store.complete_trace(trace_id, response.status_code, round(elapsed, 2))
 
         return new_response

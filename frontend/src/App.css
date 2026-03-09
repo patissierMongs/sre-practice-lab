@@ -1673,6 +1673,246 @@ table tr:hover { background: #f8f9fa; }
   background: #161b22;
 }
 
+/* ── Red/Blue Team Toggle ── */
+.left-tab-toggle {
+  display: flex;
+  border-bottom: 1px solid #30363d;
+}
+.left-tab-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  background: #0d1117;
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+.left-tab-btn.red-tab.active {
+  color: #ff6b6b;
+  border-bottom-color: #ff6b6b;
+  background: #1a0a0a;
+}
+.left-tab-btn.blue-tab.active {
+  color: #60a5fa;
+  border-bottom-color: #60a5fa;
+  background: #0a0a1a;
+}
+.left-tab-btn:hover:not(.active) {
+  background: #161b22;
+}
+
+/* ── Defense Lab ── */
+.defense-lab {
+  padding: 8px;
+  font-size: 12px;
+  overflow-y: auto;
+  max-height: 300px;
+}
+.defense-flash {
+  padding: 4px 8px;
+  background: #1a2744;
+  color: #60a5fa;
+  border-radius: 4px;
+  font-size: 11px;
+  margin-bottom: 6px;
+  text-align: center;
+}
+.defense-section {
+  margin-bottom: 8px;
+}
+.defense-section h4 {
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.defense-toggles {
+  display: flex;
+  gap: 6px;
+}
+.defense-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #161b22;
+  color: #c9d1d9;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.defense-toggle .toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4444;
+  transition: background 0.2s;
+}
+.defense-toggle.on .toggle-dot { background: #00c853; }
+.defense-toggle.on { border-color: #00c85344; }
+.defense-toggle.off { border-color: #ff444444; }
+
+.defense-kernel-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.kstat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px;
+  background: #0d1117;
+  border-radius: 4px;
+  border: 1px solid #21262d;
+}
+.kstat-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e6edf3;
+  font-family: monospace;
+}
+.kstat-val.kstat-drop { color: #ef4444; }
+.kstat-val.kstat-reject { color: #f97316; }
+.kstat-label {
+  font-size: 9px;
+  color: #6e7681;
+  text-transform: uppercase;
+}
+
+.defense-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.defense-preset-btn {
+  padding: 5px 8px;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  background: #161b22;
+  color: #c9d1d9;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.defense-preset-btn:hover {
+  background: #1a1a2e;
+  border-color: #ef5350;
+}
+.defense-flush-btn {
+  padding: 2px 8px;
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  background: transparent;
+  color: #f97316;
+  font-size: 10px;
+  cursor: pointer;
+}
+.defense-flush-btn:hover { background: #2a1a0a; }
+
+.defense-custom-form {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.defense-custom-form select,
+.defense-custom-form input {
+  padding: 4px 6px;
+  border: 1px solid #21262d;
+  border-radius: 3px;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-size: 11px;
+  font-family: monospace;
+}
+.defense-custom-form select { width: 70px; }
+.defense-custom-form input { width: 80px; }
+.defense-add-btn {
+  padding: 4px 10px;
+  border: 1px solid #3b82f6;
+  border-radius: 3px;
+  background: #172040;
+  color: #60a5fa;
+  font-size: 11px;
+  cursor: pointer;
+}
+.defense-add-btn:hover { background: #1e3a5f; }
+
+.defense-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.defense-empty {
+  color: #6e7681;
+  font-size: 11px;
+  padding: 8px;
+  text-align: center;
+}
+.defense-rule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+}
+.defense-rule.rule-drop {
+  background: #1a0808;
+  border: 1px solid #5a1515;
+}
+.defense-rule.rule-accept {
+  background: #081a08;
+  border: 1px solid #155a15;
+}
+.rule-chain {
+  color: #8b949e;
+  min-width: 50px;
+}
+.rule-target {
+  font-weight: 700;
+  min-width: 50px;
+}
+.rule-drop .rule-target { color: #ef4444; }
+.rule-accept .rule-target { color: #22c55e; }
+.rule-proto {
+  color: #60a5fa;
+  min-width: 30px;
+}
+.rule-detail {
+  color: #8b949e;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rule-pkts {
+  color: #6e7681;
+  font-size: 10px;
+}
+.rule-delete {
+  border: none;
+  background: none;
+  color: #6e7681;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.rule-delete:hover { color: #ef4444; }
+
 /* ── Particle Inspector Popup ── */
 .particle-inspector {
   position: fixed;

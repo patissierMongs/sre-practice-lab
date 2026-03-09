@@ -3,6 +3,7 @@ import TopologyMap from '../components/network/TopologyMap';
 import PacketList from '../components/network/PacketList';
 import PacketDetail from '../components/network/PacketDetail';
 import DDoSControl from '../components/network/DDoSControl';
+import DefenseLab from '../components/network/DefenseLab';
 import TrafficStats from '../components/network/TrafficStats';
 import WebTerminal from '../components/network/WebTerminal';
 import LayerDiagram from '../components/network/LayerDiagram';
@@ -23,6 +24,7 @@ function NetworkMonitor() {
   const [filter, setFilter] = useState({ method: '', path: '', statusMin: '', statusMax: '' });
   const [activeTab, setActiveTab] = useState('xray');
   const [topoView, setTopoView] = useState('particles');
+  const [leftTab, setLeftTab] = useState('attack'); // 'attack' or 'defense'
   const redCommandRef = useRef(null);
   const blueCommandRef = useRef(null);
 
@@ -60,7 +62,7 @@ function NetworkMonitor() {
       />
 
       <div className="nm-main">
-        {/* Left: Topology + Attack Control */}
+        {/* Left: Topology + Attack/Defense */}
         <div className="nm-left">
           <div className="nm-topology">
             <div className="panel-header">
@@ -94,7 +96,27 @@ function NetworkMonitor() {
             )}
           </div>
 
-          <DDoSControl onSendCommand={handleSendCommand} />
+          {/* Red Team / Blue Team toggle */}
+          <div className="left-tab-toggle">
+            <button
+              className={`left-tab-btn red-tab ${leftTab === 'attack' ? 'active' : ''}`}
+              onClick={() => setLeftTab('attack')}
+            >
+              Red Team
+            </button>
+            <button
+              className={`left-tab-btn blue-tab ${leftTab === 'defense' ? 'active' : ''}`}
+              onClick={() => setLeftTab('defense')}
+            >
+              Blue Team
+            </button>
+          </div>
+
+          {leftTab === 'attack' ? (
+            <DDoSControl onSendCommand={handleSendCommand} />
+          ) : (
+            <DefenseLab systemState={systemState} />
+          )}
         </div>
 
         {/* Right: X-ray / Packets / Terminal */}
