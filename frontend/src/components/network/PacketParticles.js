@@ -301,6 +301,133 @@ function drawLaptop(ctx, x, y, s, colors) {
   ctx.restore();
 }
 
+// ── Node status overlay ──
+function getNodeHealth(sysState, deviceId) {
+  if (!sysState) return null;
+  const net = sysState.network || {};
+  const app = sysState.application || {};
+  const db = sysState.database || {};
+  const redis = sysState.redis || {};
+  const nginx = sysState.nginx || {};
+  const tcp = net.tcp_table || {};
+  const kd = net.kernel_drops || {};
+  const synRecv = (tcp.state_counts || {})['SYN-RECV'] || 0;
+  const estab = (tcp.state_counts || {})['ESTAB'] || 0;
+
+  switch (deviceId) {
+    case 'nginx': {
+      const drops = (kd.iptables_drops || 0) + (kd.iptables_rejects || 0);
+      const underAttack = synRecv > 10 || drops > 100;
+      const conns = nginx.active_connections || estab;
+      return {
+        status: underAttack ? 'danger' : conns > 50 ? 'warning' : 'healthy',
+        label: `${conns} conn`,
+        metric: underAttack ? `${synRecv} SYN` : null,
+        underAttack,
+      };
+    }
+    case 'backend': {
+      const errRate = app.error_rate || 0;
+      const latency = app.avg_response_time_ms || 0;
+      return {
+        status: errRate > 20 ? 'danger' : errRate > 5 ? 'warning' : 'healthy',
+        label: `${latency.toFixed(0)}ms`,
+        metric: errRate > 0 ? `${errRate.toFixed(1)}% err` : null,
+      };
+    }
+    case 'postgres': {
+      const pool = db.pool_size || 0;
+      const active = db.active_queries || 0;
+      const hitRatio = db.cache_hit_ratio || 0;
+      return {
+        status: active > pool * 0.8 ? 'danger' : active > pool * 0.5 ? 'warning' : 'healthy',
+        label: `${active}/${pool}`,
+        metric: hitRatio > 0 ? `${(hitRatio * 100).toFixed(0)}% hit` : null,
+      };
+    }
+    case 'redis': {
+      const clients = redis.connected_clients || 0;
+      const hitRate = redis.hit_rate || 0;
+      return {
+        status: clients > 100 ? 'warning' : 'healthy',
+        label: `${clients} cli`,
+        metric: hitRate > 0 ? `${(hitRate * 100).toFixed(0)}% hit` : null,
+      };
+    }
+    case 'attacker': {
+      return {
+        status: synRecv > 5 ? 'danger' : 'idle',
+        label: synRecv > 5 ? 'ACTIVE' : 'idle',
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+const STATUS_COLORS = {
+  healthy: '#22c55e',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  idle: '#64748b',
+};
+
+function drawNodeStatus(ctx, x, y, iconSize, health, time) {
+  if (!health) return;
+  const sc = STATUS_COLORS[health.status] || STATUS_COLORS.healthy;
+
+  // Replace the static green dot with dynamic status dot
+  // (handled in main draw loop now)
+
+  // Mini status bar below device label
+  const barW = iconSize * 0.7;
+  const barH = 5;
+  const barX = x - barW / 2;
+  const barY = y + iconSize * 0.48 + 32;
+
+  // Background
+  ctx.fillStyle = '#0b1120';
+  ctx.strokeStyle = '#1e3350';
+  ctx.lineWidth = 1;
+  rrect(ctx, barX - 1, barY - 1, barW + 2, barH + 2, 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Fill based on status
+  const fillRatio = health.status === 'danger' ? 0.9 : health.status === 'warning' ? 0.6 : 0.3;
+  ctx.fillStyle = sc + 'cc';
+  rrect(ctx, barX, barY, barW * fillRatio, barH, 2);
+  ctx.fill();
+
+  // Metric label
+  const fs = Math.max(8, iconSize * 0.20);
+  ctx.font = `bold ${fs}px monospace`;
+  ctx.fillStyle = sc;
+  ctx.textAlign = 'center';
+  ctx.fillText(health.label, x, barY + barH + fs + 2);
+
+  if (health.metric) {
+    ctx.font = `${fs - 1}px monospace`;
+    ctx.fillStyle = sc + 'cc';
+    ctx.fillText(health.metric, x, barY + barH + fs * 2 + 4);
+  }
+
+  // Under attack pulsing glow
+  if (health.underAttack) {
+    const pulse = 0.3 + Math.sin(time * 0.005) * 0.3;
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(x, y, iconSize * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 const ICON_RENDERERS = {
   cloud: drawCloud,
   router: drawRouter,
@@ -312,7 +439,7 @@ const ICON_RENDERERS = {
 };
 
 // ── Wire drawing ──
-function drawWire(ctx, from, to, fromPort, toPort, active, iconSize) {
+function drawWire(ctx, from, to, fromPort, toPort, active, iconSize, trafficCount = 0) {
   ctx.save();
 
   // Orthogonal routing: if angle is steep, use L-shaped path
@@ -320,8 +447,12 @@ function drawWire(ctx, from, to, fromPort, toPort, active, iconSize) {
   const dy = to.y - from.y;
   const angle = Math.atan2(Math.abs(dy), Math.abs(dx));
 
-  ctx.strokeStyle = active ? C.wireActive : C.wire;
-  ctx.lineWidth = active ? 2.5 : 1.5;
+  // Wire thickness scales with traffic volume
+  const baseWidth = active ? 2.5 : 1.5;
+  const trafficWidth = Math.min(baseWidth + trafficCount * 0.3, 6);
+  const wireColor = trafficCount > 10 ? '#ef4444' : trafficCount > 5 ? '#f59e0b' : active ? C.wireActive : C.wire;
+  ctx.strokeStyle = wireColor;
+  ctx.lineWidth = active ? trafficWidth : baseWidth;
 
   if (angle > Math.PI / 4 && Math.abs(dx) > 40) {
     // L-shaped routing
@@ -411,33 +542,29 @@ function drawEnvelope(ctx, x, y, color, size, blocked) {
 }
 
 // ── Packet route determination ──
+// Uses actual packet metadata from kernel/middleware tracing — not path guessing
 function isAttack(packet) {
-  return packet.blocked || packet.attack_type === 'xss' || packet.attack_type === 'sqli'
-    || packet.attack_type === 'ddos' || (packet.status_code && packet.status_code === 429);
+  const at = packet.attack_type || '';
+  return (at !== 'normal' && at !== '') || packet.blocked || packet.status_code === 429;
 }
 
-function getRoute(packet) {
-  const path = packet.path || '';
-  const layer = packet.layer || '';
-  const attack = isAttack(packet);
-  const origin = attack ? 'attacker' : 'client';
+function getRequestRoute(packet) {
+  const origin = isAttack(packet) ? 'attacker' : 'client';
 
-  if (layer === 'nginx') {
-    const route = [origin, 'internet', 'nginx'];
-    if (!packet.blocked) {
-      route.push(path.startsWith('/api') ? 'backend' : 'frontend');
-    }
+  // Request route (outbound)
+  const route = [origin, 'internet', 'nginx'];
+
+  if (packet.blocked) {
+    // Blocked at nginx (rate limit / firewall) — stops here
     return route;
   }
 
-  const route = [origin, 'internet', 'nginx', 'backend'];
+  // Passed nginx → backend
+  route.push('backend');
 
-  // SQLi attacks that aren't blocked reach the DB
-  const dbPath = path.includes('/posts') || path.includes('/users') || path.includes('/health');
-  if (dbPath || packet.attack_type === 'sqli') {
-    if (!packet.blocked) {
-      route.push('postgres');
-    }
+  // Only show DB hop if backend confirmed DB access via trace
+  if (packet.has_db) {
+    route.push('postgres');
   }
 
   return route;
@@ -448,6 +575,12 @@ function getColor(packet) {
   if (packet.status_code >= 500) return '#f97316';
   if (packet.status_code >= 400) return '#eab308';
   return '#22d3ee';
+}
+
+function getResponseColor(packet) {
+  if (packet.status_code >= 500) return '#f97316';
+  if (packet.status_code >= 400) return '#eab308';
+  return '#34d399'; // green for response
 }
 
 // ── Debris: dropped packets that pile up ──
@@ -542,14 +675,89 @@ class Spark {
   }
 }
 
+// ── SYN Flood wave effect ──
+class SynWave {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 5;
+    this.maxRadius = 60;
+    this.life = 1;
+    this.alive = true;
+  }
+  update() {
+    this.radius += 1.5;
+    this.life = 1 - this.radius / this.maxRadius;
+    if (this.life <= 0) this.alive = false;
+  }
+  draw(ctx) {
+    if (!this.alive) return;
+    ctx.save();
+    ctx.globalAlpha = this.life * 0.4;
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ── Port scan ripple effect ──
+class PortScanRipple {
+  constructor(x, y, port) {
+    this.x = x;
+    this.y = y;
+    this.port = port;
+    this.angle = 0;
+    this.radius = 40;
+    this.life = 1;
+    this.alive = true;
+    this.dotAngle = Math.random() * Math.PI * 2;
+  }
+  update() {
+    this.dotAngle += 0.08;
+    this.life -= 0.012;
+    if (this.life <= 0) this.alive = false;
+  }
+  draw(ctx) {
+    if (!this.alive) return;
+    ctx.save();
+    ctx.globalAlpha = this.life * 0.6;
+    // Scanning arc
+    ctx.strokeStyle = '#eab308';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, this.dotAngle, this.dotAngle + Math.PI * 0.4);
+    ctx.stroke();
+    // Scanning dot
+    const dx = Math.cos(this.dotAngle) * this.radius;
+    const dy = Math.sin(this.dotAngle) * this.radius;
+    ctx.fillStyle = '#eab308';
+    ctx.shadowColor = '#eab308';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(this.x + dx, this.y + dy, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Port label
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold 9px monospace';
+    ctx.fillStyle = '#eab308';
+    ctx.textAlign = 'center';
+    ctx.fillText(`:${this.port}`, this.x + dx, this.y + dy - 8);
+    ctx.restore();
+  }
+}
+
 // ── Packet envelope entity ──
 class PacketEnvelope {
-  constructor(packet, route, id, dmap) {
+  constructor(packet, route, id, dmap, isResponse = false) {
     this.id = id;
     this.packet = packet;
     this.route = route;
-    this.color = getColor(packet);
-    this.size = 16;
+    this.isResponse = isResponse;
+    this.color = isResponse ? getResponseColor(packet) : getColor(packet);
+    this.size = isResponse ? 13 : 16;
     this.opacity = 1;
     this.progress = 0;
     this.segIdx = 0;
@@ -634,7 +842,29 @@ class PacketEnvelope {
     if (!this.alive) return;
     ctx.save();
     ctx.globalAlpha = this.opacity;
-    drawEnvelope(ctx, this.x, this.y, this.color, this.size, this.packet.blocked && this.bouncing);
+    if (this.isResponse) {
+      // Response: smaller, filled circle with arrow ← (simpler shape)
+      const r = this.size * 0.4;
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      // Arrow inside
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#0b1120';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(this.x + r * 0.4, this.y);
+      ctx.lineTo(this.x - r * 0.3, this.y);
+      ctx.moveTo(this.x - r * 0.1, this.y - r * 0.35);
+      ctx.lineTo(this.x - r * 0.3, this.y);
+      ctx.lineTo(this.x - r * 0.1, this.y + r * 0.35);
+      ctx.stroke();
+    } else {
+      drawEnvelope(ctx, this.x, this.y, this.color, this.size, this.packet.blocked && this.bouncing);
+    }
     ctx.restore();
   }
 
@@ -645,20 +875,23 @@ class PacketEnvelope {
 
 // ── Traffic counter per link ──
 function getActiveLinks(envelopes) {
-  const active = new Set();
+  const counts = {};
   envelopes.forEach(e => {
     if (!e.alive || e.bouncing) return;
     const a = e.route[e.segIdx];
     const b = e.route[e.segIdx + 1];
-    if (a && b) active.add(`${a}->${b}`);
+    if (a && b) {
+      const key = `${a}->${b}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }
   });
-  return active;
+  return counts;
 }
 
 // ═══════════════════════════════════
 // Main Component
 // ═══════════════════════════════════
-function PacketParticles({ packets, onParticleClick }) {
+function PacketParticles({ packets, systemState, onParticleClick }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const envRef = useRef([]);
@@ -669,6 +902,14 @@ function PacketParticles({ packets, onParticleClick }) {
   const animRef = useRef(null);
   const sizeRef = useRef({ w: 600, h: 400 });
   const dposRef = useRef({});
+  const sysRef = useRef(null);
+  const synWavesRef = useRef([]);
+  const portScansRef = useRef([]);
+  const lastSynWaveRef = useRef(0);
+  const lastPortScanRef = useRef(0);
+
+  // Keep systemState in sync via ref for animation loop
+  useEffect(() => { sysRef.current = systemState; }, [systemState]);
 
   const computePos = useCallback(() => {
     const { w, h } = sizeRef.current;
@@ -714,14 +955,23 @@ function PacketParticles({ packets, onParticleClick }) {
     prevLenRef.current = packets.length;
 
     fresh.forEach(pkt => {
-      const route = getRoute(pkt);
-      if (route.length < 2) return;
+      const reqRoute = getRequestRoute(pkt);
+      if (reqRoute.length < 2) return;
+
+      // Request envelope (outbound)
       idRef.current++;
-      envRef.current.push(new PacketEnvelope(pkt, route, idRef.current, dposRef.current));
+      envRef.current.push(new PacketEnvelope(pkt, reqRoute, idRef.current, dposRef.current, false));
+
+      // Response envelope (return trip) — only if not blocked
+      if (!pkt.blocked) {
+        idRef.current++;
+        const respRoute = [...reqRoute].reverse();
+        envRef.current.push(new PacketEnvelope(pkt, respRoute, idRef.current, dposRef.current, true));
+      }
     });
 
-    if (envRef.current.length > 150) {
-      envRef.current = envRef.current.slice(-100);
+    if (envRef.current.length > 200) {
+      envRef.current = envRef.current.slice(-150);
     }
   }, [packets]);
 
@@ -752,10 +1002,13 @@ function PacketParticles({ packets, onParticleClick }) {
         const b = dp[link.to];
         if (!a || !b) return;
         const key = `${link.from}->${link.to}`;
-        drawWire(ctx, a, b, link.fromPort, link.toPort, activeLinks.has(key), iconSize);
+        const count = activeLinks[key] || 0;
+        drawWire(ctx, a, b, link.fromPort, link.toPort, count > 0, iconSize, count);
       });
 
       // Devices
+      const now = Date.now();
+      const ss = sysRef.current;
       DEVICES.forEach(dev => {
         const p = dp[dev.id];
         if (!p) return;
@@ -764,8 +1017,10 @@ function PacketParticles({ packets, onParticleClick }) {
         const colors = C[dev.type] || C.server;
         if (render) render(ctx, p.x, p.y, iconSize, colors);
 
-        // Status dot (green = up)
-        ctx.fillStyle = '#22c55e';
+        // Dynamic status dot
+        const health = getNodeHealth(ss, dev.id);
+        const dotColor = health ? (STATUS_COLORS[health.status] || '#22c55e') : '#22c55e';
+        ctx.fillStyle = dotColor;
         ctx.beginPath();
         ctx.arc(p.x + iconSize * 0.32, p.y - iconSize * 0.32, 3.5, 0, Math.PI * 2);
         ctx.fill();
@@ -782,10 +1037,9 @@ function PacketParticles({ packets, onParticleClick }) {
         lines.forEach((line, i) => {
           ctx.fillText(line, p.x, p.y + iconSize * 0.48 + 14 + i * (fs + 2));
         });
-        // Sub-label (second line dimmer)
-        if (lines.length > 1) {
-          // already drawn above, just the first line is bright
-        }
+
+        // Node health status overlay
+        drawNodeStatus(ctx, p.x, p.y, iconSize, health, now);
       });
 
       // Debris (piled up dropped packets) — draw UNDER envelopes
@@ -836,6 +1090,38 @@ function PacketParticles({ packets, onParticleClick }) {
       sparksRef.current = sparksRef.current.filter(s => { s.update(); return s.alive; });
       sparksRef.current.forEach(s => s.draw(ctx));
 
+      // SYN Flood wave effects — spawn when SYN-RECV is high
+      if (ss) {
+        const tcp = ss.network?.tcp_table || {};
+        const synRecv = (tcp.state_counts || {})['SYN-RECV'] || 0;
+        if (synRecv > 5 && now - lastSynWaveRef.current > (synRecv > 20 ? 200 : 500)) {
+          const nginxPos = dp['nginx'];
+          if (nginxPos) {
+            synWavesRef.current.push(new SynWave(nginxPos.x, nginxPos.y));
+            lastSynWaveRef.current = now;
+          }
+        }
+      }
+      synWavesRef.current = synWavesRef.current.filter(w => { w.update(); return w.alive; });
+      synWavesRef.current.forEach(w => w.draw(ctx));
+
+      // Port scan ripple effects — spawn when nmap/recon packets detected
+      const recentPackets = (envRef.current || []).slice(-10);
+      const scanPacket = recentPackets.find(e =>
+        e.packet && (e.packet.attack_type === 'recon' || e.packet.path?.includes('nmap'))
+      );
+      if (scanPacket && now - lastPortScanRef.current > 800) {
+        const targetPos = dp['nginx'] || dp['backend'];
+        if (targetPos) {
+          const ports = [22, 80, 443, 3000, 5432, 6379, 8000, 9090];
+          const port = ports[Math.floor(Math.random() * ports.length)];
+          portScansRef.current.push(new PortScanRipple(targetPos.x, targetPos.y, port));
+          lastPortScanRef.current = now;
+        }
+      }
+      portScansRef.current = portScansRef.current.filter(r => { r.update(); return r.alive; });
+      portScansRef.current.forEach(r => r.draw(ctx));
+
       // Legend
       drawLegend(ctx, w, h);
 
@@ -851,7 +1137,8 @@ function PacketParticles({ packets, onParticleClick }) {
     const lx = 12, ly = h - 14;
     ctx.font = '10px monospace';
     const items = [
-      { color: '#22d3ee', label: 'Normal' },
+      { color: '#22d3ee', label: 'Request' },
+      { color: '#34d399', label: 'Response' },
       { color: '#ef4444', label: 'Blocked' },
       { color: '#f97316', label: '5xx' },
       { color: '#eab308', label: '4xx' },
