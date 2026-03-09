@@ -2199,6 +2199,8 @@ table tr:hover { background: #f8f9fa; }
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: calc(100vh - 170px);
+  padding: 8px;
 }
 
 .event-timeline {

@@ -339,6 +339,7 @@ function getNodeHealth(sysState, deviceId) {
       const pool = db.pool_size || 0;
       const active = db.active_queries || 0;
       const hitRatio = db.cache_hit_ratio || 0;
+      if (pool === 0) return null; // No data yet
       return {
         status: active > pool * 0.8 ? 'danger' : active > pool * 0.5 ? 'warning' : 'healthy',
         label: `${active}/${pool}`,
@@ -372,18 +373,18 @@ const STATUS_COLORS = {
   idle: '#64748b',
 };
 
-function drawNodeStatus(ctx, x, y, iconSize, health, time) {
+function drawNodeStatus(ctx, x, y, iconSize, health, time, labelLines) {
   if (!health) return;
+  if (health.status === 'idle') return; // Don't show bar for idle nodes
   const sc = STATUS_COLORS[health.status] || STATUS_COLORS.healthy;
 
-  // Replace the static green dot with dynamic status dot
-  // (handled in main draw loop now)
-
-  // Mini status bar below device label
+  // Mini status bar below device label — offset based on label line count
+  const fs = Math.max(8, iconSize * 0.20);
+  const labelOffset = (labelLines || 1) * (fs * 1.4 + 2);
   const barW = iconSize * 0.7;
   const barH = 5;
   const barX = x - barW / 2;
-  const barY = y + iconSize * 0.48 + 32;
+  const barY = y + iconSize * 0.48 + 14 + labelOffset;
 
   // Background
   ctx.fillStyle = '#0b1120';
@@ -400,7 +401,6 @@ function drawNodeStatus(ctx, x, y, iconSize, health, time) {
   ctx.fill();
 
   // Metric label
-  const fs = Math.max(8, iconSize * 0.20);
   ctx.font = `bold ${fs}px monospace`;
   ctx.fillStyle = sc;
   ctx.textAlign = 'center';
@@ -473,7 +473,7 @@ function drawWire(ctx, from, to, fromPort, toPort, active, iconSize, trafficCoun
 
   // Active glow
   if (active) {
-    ctx.shadowColor = C.wireActive;
+    ctx.shadowColor = wireColor;
     ctx.shadowBlur = 8;
     ctx.globalAlpha = 0.3;
     ctx.stroke();
@@ -1039,7 +1039,7 @@ function PacketParticles({ packets, systemState, onParticleClick }) {
         });
 
         // Node health status overlay
-        drawNodeStatus(ctx, p.x, p.y, iconSize, health, now);
+        drawNodeStatus(ctx, p.x, p.y, iconSize, health, now, lines.length);
       });
 
       // Debris (piled up dropped packets) — draw UNDER envelopes
