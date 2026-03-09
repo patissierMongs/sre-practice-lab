@@ -1,150 +1,78 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 
 /**
- * Packet Tracer Simulation Mode
+ * Cisco Packet Tracer – Simulation Mode
  *
- * Cisco Packet Tracer style: device icons connected by wires,
- * packets rendered as envelopes traveling along connections.
- * Click an envelope to inspect PDU details at each layer.
+ * Dark themed topology with recognizable network device icons,
+ * grid background, wire connections with port labels,
+ * and animated envelope packets.
  */
 
-// ── Device definitions (positions are in 0-1 normalized coords) ──
+// ── Topology layout ──
 const DEVICES = [
-  { id: 'traffic-gen', name: 'Traffic\nGenerator', type: 'cloud',   nx: 0.06, ny: 0.40 },
-  { id: 'nginx',       name: 'Nginx',              type: 'server',  nx: 0.30, ny: 0.40 },
-  { id: 'frontend',    name: 'Frontend',            type: 'desktop', nx: 0.54, ny: 0.15 },
-  { id: 'backend',     name: 'Backend',             type: 'server',  nx: 0.54, ny: 0.65 },
-  { id: 'postgres',    name: 'PostgreSQL',          type: 'db',      nx: 0.82, ny: 0.50 },
-  { id: 'redis',       name: 'Redis',               type: 'db',      nx: 0.82, ny: 0.82 },
-  { id: 'prometheus',  name: 'Prometheus',           type: 'monitor', nx: 0.30, ny: 0.85 },
-  { id: 'grafana',     name: 'Grafana',              type: 'monitor', nx: 0.06, ny: 0.85 },
+  { id: 'internet',    label: 'Internet',          type: 'cloud',   nx: 0.08, ny: 0.38 },
+  { id: 'nginx',       label: 'Nginx',             type: 'router',  nx: 0.28, ny: 0.38 },
+  { id: 'frontend',    label: 'Frontend\n(React)',  type: 'pc',      nx: 0.50, ny: 0.13 },
+  { id: 'backend',     label: 'Backend\n(FastAPI)', type: 'server',  nx: 0.50, ny: 0.62 },
+  { id: 'postgres',    label: 'PostgreSQL',         type: 'db',      nx: 0.78, ny: 0.42 },
+  { id: 'redis',       label: 'Redis',              type: 'db',      nx: 0.78, ny: 0.78 },
+  { id: 'prometheus',  label: 'Prometheus',         type: 'monitor', nx: 0.28, ny: 0.80 },
+  { id: 'grafana',     label: 'Grafana',            type: 'monitor', nx: 0.08, ny: 0.80 },
 ];
 
 const LINKS = [
-  ['traffic-gen', 'nginx'],
-  ['nginx', 'frontend'],
-  ['nginx', 'backend'],
-  ['backend', 'postgres'],
-  ['backend', 'redis'],
-  ['backend', 'prometheus'],
-  ['prometheus', 'grafana'],
+  { from: 'internet',   to: 'nginx',      fromPort: ':80',   toPort: ':80' },
+  { from: 'nginx',      to: 'frontend',   fromPort: ':3000', toPort: ':3000' },
+  { from: 'nginx',      to: 'backend',    fromPort: ':8000', toPort: ':8000' },
+  { from: 'backend',    to: 'postgres',   fromPort: '',      toPort: ':5432' },
+  { from: 'backend',    to: 'redis',      fromPort: '',      toPort: ':6379' },
+  { from: 'backend',    to: 'prometheus', fromPort: '',      toPort: ':9090' },
+  { from: 'prometheus', to: 'grafana',    fromPort: '',      toPort: ':3000' },
 ];
 
-// ── Device icon drawing ──
-function drawDeviceIcon(ctx, type, x, y, w) {
-  const h = w;
-  ctx.save();
+// ── Colors ──
+const C = {
+  bg: '#0b1120',
+  grid: '#131d30',
+  gridAccent: '#1a2744',
+  wire: '#1e3350',
+  wireActive: '#3b82f6',
+  text: '#94a3b8',
+  textBright: '#e2e8f0',
+  portLabel: '#64748b',
+  // Device fills
+  cloud:   { fill: '#1a1040', stroke: '#8b5cf6', accent: '#a78bfa' },
+  router:  { fill: '#0c2a1e', stroke: '#10b981', accent: '#34d399' },
+  server:  { fill: '#172040', stroke: '#3b82f6', accent: '#60a5fa' },
+  pc:      { fill: '#1a2030', stroke: '#64748b', accent: '#94a3b8' },
+  db:      { fill: '#1a2e1a', stroke: '#22c55e', accent: '#4ade80' },
+  monitor: { fill: '#2a1a0a', stroke: '#f59e0b', accent: '#fbbf24' },
+};
 
-  switch (type) {
-    case 'server': {
-      // Rack server icon
-      const rw = w * 0.8, rh = h * 0.9;
-      const rx = x - rw / 2, ry = y - rh / 2;
-      ctx.fillStyle = '#1e3a5f';
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 1.5;
-      roundRect(ctx, rx, ry, rw, rh, 4);
-      ctx.fill();
-      ctx.stroke();
-      // Slots
-      for (let i = 0; i < 3; i++) {
-        const sy = ry + 6 + i * (rh / 3.5);
-        ctx.fillStyle = '#0f2440';
-        ctx.fillRect(rx + 4, sy, rw - 8, rh / 5);
-        ctx.fillStyle = i === 0 ? '#22c55e' : '#3b82f6';
-        ctx.beginPath();
-        ctx.arc(rx + rw - 8, sy + rh / 10, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
-    }
-    case 'db': {
-      // Database cylinder
-      const cw = w * 0.6, ch = h * 0.85;
-      const cx = x, cy = y;
-      ctx.fillStyle = '#1a3a2a';
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 1.5;
-      // Body
-      ctx.beginPath();
-      ctx.ellipse(cx, cy - ch / 3, cw / 2, ch / 6, 0, Math.PI, 0);
-      ctx.lineTo(cx + cw / 2, cy + ch / 4);
-      ctx.ellipse(cx, cy + ch / 4, cw / 2, ch / 6, 0, 0, Math.PI);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      // Top ellipse
-      ctx.beginPath();
-      ctx.ellipse(cx, cy - ch / 3, cw / 2, ch / 6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#245238';
-      ctx.fill();
-      ctx.stroke();
-      break;
-    }
-    case 'cloud': {
-      // Cloud shape
-      ctx.fillStyle = '#2d1f3d';
-      ctx.strokeStyle = '#a855f7';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(x - w * 0.15, y, w * 0.25, 0, Math.PI * 2);
-      ctx.arc(x + w * 0.15, y, w * 0.25, 0, Math.PI * 2);
-      ctx.arc(x, y - h * 0.12, w * 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      break;
-    }
-    case 'desktop': {
-      // Monitor
-      const mw = w * 0.7, mh = h * 0.55;
-      ctx.fillStyle = '#1e293b';
-      ctx.strokeStyle = '#64748b';
-      ctx.lineWidth = 1.5;
-      roundRect(ctx, x - mw / 2, y - mh / 2 - 4, mw, mh, 3);
-      ctx.fill();
-      ctx.stroke();
-      // Screen glow
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(x - mw / 2 + 3, y - mh / 2 - 1, mw - 6, mh - 6);
-      // Stand
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(x - 3, y + mh / 2 - 4, 6, 8);
-      ctx.fillRect(x - 10, y + mh / 2 + 3, 20, 3);
-      break;
-    }
-    case 'monitor': {
-      // Dashboard/gauge
-      const mr = w * 0.35;
-      ctx.fillStyle = '#1a1a2e';
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(x, y, mr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Gauge needle
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + mr * 0.6, y - mr * 0.3);
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(x, y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = '#f59e0b';
-      ctx.fill();
-      break;
-    }
-    default:
-      ctx.fillStyle = '#21262d';
-      ctx.beginPath();
-      ctx.arc(x, y, w * 0.3, 0, Math.PI * 2);
-      ctx.fill();
+// ── Grid background ──
+function drawGrid(ctx, w, h) {
+  const step = 20;
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < w; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
-  ctx.restore();
+  for (let y = 0; y < h; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  // Accent every 5th line
+  ctx.strokeStyle = C.gridAccent;
+  ctx.lineWidth = 0.7;
+  for (let x = 0; x < w; x += step * 5) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let y = 0; y < h; y += step * 5) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
 }
 
-function roundRect(ctx, x, y, w, h, r) {
+// ── Rounded rect helper ──
+function rrect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + w - r, y);
@@ -158,35 +86,275 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// ── Envelope (packet) drawing ──
-function drawEnvelope(ctx, x, y, color, size, blocked) {
-  const w = size, h = size * 0.7;
+// ── Device icon renderers ──
+function drawCloud(ctx, x, y, s, colors) {
   ctx.save();
-  ctx.globalAlpha = 1;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 6;
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x - s * 0.22, y + s * 0.05, s * 0.28, Math.PI * 0.4, Math.PI * 1.8);
+  ctx.arc(x + s * 0.05, y - s * 0.18, s * 0.26, Math.PI * 1.0, Math.PI * 0.2);
+  ctx.arc(x + s * 0.26, y + s * 0.04, s * 0.24, Math.PI * 1.4, Math.PI * 0.7);
+  ctx.arc(x, y + s * 0.22, s * 0.35, Math.PI * 0.0, Math.PI * 1.0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
 
-  // Envelope body
-  ctx.fillStyle = blocked ? '#3a1515' : '#1a2233';
+function drawRouter(ctx, x, y, s, colors) {
+  // Cisco router icon: circle with arrows
+  ctx.save();
+  const r = s * 0.38;
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Cross arrows inside
+  ctx.strokeStyle = colors.accent;
+  ctx.lineWidth = 2;
+  const ar = r * 0.55;
+  // Horizontal arrow
+  ctx.beginPath();
+  ctx.moveTo(x - ar, y); ctx.lineTo(x + ar, y);
+  ctx.moveTo(x + ar - 4, y - 4); ctx.lineTo(x + ar, y); ctx.lineTo(x + ar - 4, y + 4);
+  ctx.stroke();
+  // Vertical arrow
+  ctx.beginPath();
+  ctx.moveTo(x, y - ar); ctx.lineTo(x, y + ar);
+  ctx.moveTo(x - 4, y + ar - 4); ctx.lineTo(x, y + ar); ctx.lineTo(x + 4, y + ar - 4);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawServer(ctx, x, y, s, colors) {
+  ctx.save();
+  const w = s * 0.65, h = s * 0.80;
+  const rx = x - w / 2, ry = y - h / 2;
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  rrect(ctx, rx, ry, w, h, 4);
+  ctx.fill();
+  ctx.stroke();
+  // 3 rack slots
+  const slotH = (h - 12) / 3;
+  for (let i = 0; i < 3; i++) {
+    const sy = ry + 4 + i * (slotH + 1);
+    ctx.fillStyle = '#070d18';
+    rrect(ctx, rx + 4, sy, w - 8, slotH - 1, 2);
+    ctx.fill();
+    // LED
+    ctx.fillStyle = i === 0 ? '#22c55e' : colors.accent;
+    ctx.beginPath();
+    ctx.arc(rx + w - 10, sy + slotH / 2 - 1, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Drive lines
+    ctx.strokeStyle = colors.stroke + '40';
+    ctx.lineWidth = 0.5;
+    for (let j = 1; j <= 3; j++) {
+      const lx = rx + 8 + j * 8;
+      ctx.beginPath(); ctx.moveTo(lx, sy + 3); ctx.lineTo(lx, sy + slotH - 4); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawPC(ctx, x, y, s, colors) {
+  ctx.save();
+  const mw = s * 0.60, mh = s * 0.45;
+  // Monitor
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  rrect(ctx, x - mw / 2, y - mh / 2 - 6, mw, mh, 3);
+  ctx.fill();
+  ctx.stroke();
+  // Screen
+  ctx.fillStyle = '#060c18';
+  rrect(ctx, x - mw / 2 + 3, y - mh / 2 - 3, mw - 6, mh - 8, 2);
+  ctx.fill();
+  // Screen glow line
+  ctx.strokeStyle = colors.accent + '30';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x - mw / 4, y - 4);
+  ctx.lineTo(x + mw / 4, y - 4);
+  ctx.stroke();
+  // Stand
+  ctx.fillStyle = colors.stroke;
+  ctx.fillRect(x - 3, y + mh / 2 - 6, 6, 10);
+  // Base
+  ctx.fillRect(x - 12, y + mh / 2 + 3, 24, 3);
+  ctx.restore();
+}
+
+function drawDB(ctx, x, y, s, colors) {
+  ctx.save();
+  const cw = s * 0.52, ch = s * 0.72;
+  const ry = ch / 5;
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  // Body
+  ctx.beginPath();
+  ctx.ellipse(x, y - ch / 2 + ry, cw / 2, ry, 0, Math.PI, 0, true);
+  ctx.lineTo(x + cw / 2, y + ch / 2 - ry);
+  ctx.ellipse(x, y + ch / 2 - ry, cw / 2, ry, 0, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Top cap
+  ctx.beginPath();
+  ctx.ellipse(x, y - ch / 2 + ry, cw / 2, ry, 0, 0, Math.PI * 2);
+  ctx.fillStyle = colors.stroke + '25';
+  ctx.fill();
+  ctx.strokeStyle = colors.stroke;
+  ctx.stroke();
+  // Middle ring
+  ctx.beginPath();
+  ctx.ellipse(x, y - ch / 8, cw / 2, ry * 0.6, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = colors.stroke + '50';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawMonitor(ctx, x, y, s, colors) {
+  // Dashboard gauge icon
+  ctx.save();
+  const r = s * 0.36;
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = 2;
+  // Outer ring
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Gauge arc
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.72, Math.PI * 0.8, Math.PI * 0.2, false);
+  ctx.strokeStyle = colors.accent;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  // Needle
+  const angle = -Math.PI * 0.4;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + Math.cos(angle) * r * 0.55, y + Math.sin(angle) * r * 0.55);
+  ctx.strokeStyle = colors.accent;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(x, y, 3, 0, Math.PI * 2);
+  ctx.fillStyle = colors.accent;
+  ctx.fill();
+  ctx.restore();
+}
+
+const ICON_RENDERERS = {
+  cloud: drawCloud,
+  router: drawRouter,
+  server: drawServer,
+  pc: drawPC,
+  db: drawDB,
+  monitor: drawMonitor,
+};
+
+// ── Wire drawing ──
+function drawWire(ctx, from, to, fromPort, toPort, active, iconSize) {
+  ctx.save();
+
+  // Orthogonal routing: if angle is steep, use L-shaped path
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const angle = Math.atan2(Math.abs(dy), Math.abs(dx));
+
+  ctx.strokeStyle = active ? C.wireActive : C.wire;
+  ctx.lineWidth = active ? 2.5 : 1.5;
+
+  if (angle > Math.PI / 4 && Math.abs(dx) > 40) {
+    // L-shaped routing
+    const midX = from.x + dx * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(midX, from.y);
+    ctx.lineTo(midX, to.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  } else {
+    // Straight line
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  }
+
+  // Active glow
+  if (active) {
+    ctx.shadowColor = C.wireActive;
+    ctx.shadowBlur = 8;
+    ctx.globalAlpha = 0.3;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  // Port labels
+  const fontSize = Math.max(8, iconSize * 0.22);
+  ctx.font = `${fontSize}px monospace`;
+  ctx.fillStyle = C.portLabel;
+  ctx.textAlign = 'center';
+
+  if (fromPort) {
+    const lx = from.x + dx * 0.15;
+    const ly = from.y + dy * 0.15 - 6;
+    ctx.fillText(fromPort, lx, ly);
+  }
+  if (toPort) {
+    const lx = from.x + dx * 0.85;
+    const ly = from.y + dy * 0.85 - 6;
+    ctx.fillText(toPort, lx, ly);
+  }
+
+  ctx.restore();
+}
+
+// ── Envelope packet ──
+function drawEnvelope(ctx, x, y, color, size, blocked) {
+  const w = size, h = size * 0.68;
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+
+  // Body
+  ctx.fillStyle = blocked ? '#2a0a0a' : '#101828';
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
-  roundRect(ctx, x - w / 2, y - h / 2, w, h, 2);
+  rrect(ctx, x - w / 2, y - h / 2, w, h, 2);
   ctx.fill();
   ctx.stroke();
 
-  // Envelope flap (triangle)
+  // Flap
   ctx.beginPath();
   ctx.moveTo(x - w / 2, y - h / 2);
   ctx.lineTo(x, y);
   ctx.lineTo(x + w / 2, y - h / 2);
-  ctx.strokeStyle = color + '88';
+  ctx.strokeStyle = color + '60';
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Blocked X overlay
+  // Blocked X
   if (blocked) {
-    ctx.strokeStyle = '#ef5350';
-    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(x - w / 3, y - h / 3);
     ctx.lineTo(x + w / 3, y + h / 3);
@@ -198,13 +366,13 @@ function drawEnvelope(ctx, x, y, color, size, blocked) {
   ctx.restore();
 }
 
-// ── Packet route logic ──
+// ── Packet route determination ──
 function getRoute(packet) {
   const path = packet.path || '';
   const layer = packet.layer || '';
 
   if (layer === 'nginx') {
-    const route = ['traffic-gen', 'nginx'];
+    const route = ['internet', 'nginx'];
     if (!packet.blocked) {
       route.push(path.startsWith('/api') ? 'backend' : 'frontend');
     }
@@ -212,96 +380,84 @@ function getRoute(packet) {
   }
 
   const route = ['nginx', 'backend'];
-  if (!packet.blocked && (path.includes('/posts') || path.includes('/users') || path.includes('/health/ready'))) {
+  if (!packet.blocked && (path.includes('/posts') || path.includes('/users') || path.includes('/health'))) {
     route.push('postgres');
   }
   return route;
 }
 
-function getEnvelopeColor(packet) {
-  if (packet.blocked) return '#ef5350';
-  if (packet.status_code >= 500) return '#ff9800';
-  if (packet.status_code >= 400) return '#ffb74d';
-  return '#4fc3f7';
+function getColor(packet) {
+  if (packet.blocked) return '#ef4444';
+  if (packet.status_code >= 500) return '#f97316';
+  if (packet.status_code >= 400) return '#eab308';
+  return '#22d3ee';
 }
 
 // ── Packet envelope entity ──
 class PacketEnvelope {
-  constructor(packet, route, id, deviceMap) {
+  constructor(packet, route, id, dmap) {
     this.id = id;
     this.packet = packet;
     this.route = route;
-    this.color = getEnvelopeColor(packet);
-    this.size = 14;
+    this.color = getColor(packet);
+    this.size = 16;
     this.opacity = 1;
     this.progress = 0;
-    this.segmentIdx = 0;
-    this.speed = 0.008 + Math.random() * 0.006;
+    this.segIdx = 0;
+    this.speed = 0.006 + Math.random() * 0.005;
     this.alive = true;
     this.bouncing = false;
-    this.bounceVx = 0;
-    this.bounceVy = 0;
+    this.bvx = 0;
+    this.bvy = 0;
     this.x = 0;
     this.y = 0;
-    this.deviceMap = deviceMap;
-    this._updatePosition();
+    this.dmap = dmap;
+    this._pos();
   }
 
-  _getDevicePos(id) {
-    return this.deviceMap[id] || { x: 0, y: 0 };
-  }
-
-  _updatePosition() {
+  _pos() {
     if (this.bouncing) return;
-    const from = this._getDevicePos(this.route[this.segmentIdx]);
-    const to = this._getDevicePos(this.route[this.segmentIdx + 1]);
-    if (!from || !to) { this.alive = false; return; }
-
+    const a = this.dmap[this.route[this.segIdx]];
+    const b = this.dmap[this.route[this.segIdx + 1]];
+    if (!a || !b) { this.alive = false; return; }
     const t = this.progress;
-    // Slight vertical offset so packets don't overlap the wire
-    const offsetY = (this.id % 2 === 0 ? -8 : 8);
-    this.x = from.x + (to.x - from.x) * t;
-    this.y = from.y + (to.y - from.y) * t + offsetY * Math.sin(t * Math.PI);
+    const off = (this.id % 2 === 0 ? -6 : 6);
+    this.x = a.x + (b.x - a.x) * t;
+    this.y = a.y + (b.y - a.y) * t + off * Math.sin(t * Math.PI);
   }
 
   update() {
     if (!this.alive) return;
-
     if (this.bouncing) {
-      this.x += this.bounceVx;
-      this.y += this.bounceVy;
-      this.bounceVy += 0.25;
-      this.bounceVx *= 0.97;
-      this.opacity -= 0.018;
-      this.size = Math.max(4, this.size - 0.08);
+      this.x += this.bvx;
+      this.y += this.bvy;
+      this.bvy += 0.3;
+      this.bvx *= 0.96;
+      this.opacity -= 0.02;
+      this.size = Math.max(4, this.size - 0.1);
       if (this.opacity <= 0) this.alive = false;
       return;
     }
-
     this.progress += this.speed;
-
     if (this.progress >= 1) {
-      this.segmentIdx++;
+      this.segIdx++;
       this.progress = 0;
-
-      if (this.packet.blocked && this.segmentIdx >= this.route.length - 1) {
+      if (this.packet.blocked && this.segIdx >= this.route.length - 1) {
         this.bouncing = true;
-        const angle = -Math.PI / 3 + Math.random() * (-Math.PI / 3);
-        const spd = 2.5 + Math.random() * 3;
-        this.bounceVx = Math.cos(angle) * spd * (Math.random() > 0.5 ? 1 : -1);
-        this.bounceVy = Math.sin(angle) * spd - 2;
-        this.size = 18;
+        const a = -Math.PI / 3 + Math.random() * (-Math.PI / 3);
+        const sp = 2 + Math.random() * 3;
+        this.bvx = Math.cos(a) * sp * (Math.random() > 0.5 ? 1 : -1);
+        this.bvy = Math.sin(a) * sp - 2;
+        this.size = 20;
         return;
       }
-
-      if (this.segmentIdx >= this.route.length - 1) {
-        this.opacity -= 0.08;
+      if (this.segIdx >= this.route.length - 1) {
+        this.opacity -= 0.1;
         if (this.opacity <= 0) this.alive = false;
         return;
       }
     }
-
-    this._updatePosition();
+    this._pos();
   }
 
   draw(ctx) {
@@ -312,9 +468,21 @@ class PacketEnvelope {
     ctx.restore();
   }
 
-  containsPoint(px, py) {
+  hit(px, py) {
     return Math.abs(px - this.x) <= this.size && Math.abs(py - this.y) <= this.size * 0.7;
   }
+}
+
+// ── Traffic counter per link ──
+function getActiveLinks(envelopes) {
+  const active = new Set();
+  envelopes.forEach(e => {
+    if (!e.alive || e.bouncing) return;
+    const a = e.route[e.segIdx];
+    const b = e.route[e.segIdx + 1];
+    if (a && b) active.add(`${a}->${b}`);
+  });
+  return active;
 }
 
 // ═══════════════════════════════════
@@ -323,22 +491,18 @@ class PacketEnvelope {
 function PacketParticles({ packets, onParticleClick }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
-  const envelopesRef = useRef([]);
-  const idCounterRef = useRef(0);
-  const prevPacketLenRef = useRef(0);
-  const animFrameRef = useRef(null);
+  const envRef = useRef([]);
+  const idRef = useRef(0);
+  const prevLenRef = useRef(0);
+  const animRef = useRef(null);
   const sizeRef = useRef({ w: 600, h: 400 });
-  const devicePosRef = useRef({});
+  const dposRef = useRef({});
 
-  // Compute device positions from container size
-  const computePositions = useCallback(() => {
-    const w = sizeRef.current.w;
-    const h = sizeRef.current.h;
-    const map = {};
-    DEVICES.forEach(d => {
-      map[d.id] = { x: d.nx * w, y: d.ny * h };
-    });
-    devicePosRef.current = map;
+  const computePos = useCallback(() => {
+    const { w, h } = sizeRef.current;
+    const m = {};
+    DEVICES.forEach(d => { m[d.id] = { x: d.nx * w, y: d.ny * h }; });
+    dposRef.current = m;
   }, []);
 
   // Resize observer
@@ -347,7 +511,7 @@ function PacketParticles({ packets, onParticleClick }) {
     if (!container) return;
     const canvas = canvasRef.current;
 
-    const observer = new ResizeObserver(entries => {
+    const ro = new ResizeObserver(entries => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
@@ -359,36 +523,33 @@ function PacketParticles({ packets, onParticleClick }) {
           canvas.style.height = height + 'px';
           const ctx = canvas.getContext('2d');
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          computePositions();
+          computePos();
         }
       }
     });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [computePositions]);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [computePos]);
 
-  // Add envelopes when packets arrive
+  // Ingest new packets
   useEffect(() => {
     if (!packets || packets.length === 0) return;
-    if (packets.length <= prevPacketLenRef.current) {
-      prevPacketLenRef.current = packets.length;
+    if (packets.length <= prevLenRef.current) {
+      prevLenRef.current = packets.length;
       return;
     }
+    const fresh = packets.slice(prevLenRef.current);
+    prevLenRef.current = packets.length;
 
-    const newPkts = packets.slice(prevPacketLenRef.current);
-    prevPacketLenRef.current = packets.length;
-
-    newPkts.forEach(pkt => {
+    fresh.forEach(pkt => {
       const route = getRoute(pkt);
       if (route.length < 2) return;
-      idCounterRef.current++;
-      envelopesRef.current.push(
-        new PacketEnvelope(pkt, route, idCounterRef.current, devicePosRef.current)
-      );
+      idRef.current++;
+      envRef.current.push(new PacketEnvelope(pkt, route, idRef.current, dposRef.current));
     });
 
-    if (envelopesRef.current.length > 150) {
-      envelopesRef.current = envelopesRef.current.slice(-100);
+    if (envRef.current.length > 150) {
+      envRef.current = envRef.current.slice(-100);
     }
   }, [packets]);
 
@@ -398,84 +559,118 @@ function PacketParticles({ packets, onParticleClick }) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    function animate() {
+    function draw() {
       const { w, h } = sizeRef.current;
-      ctx.clearRect(0, 0, w, h);
+      const dp = dposRef.current;
+      const iconSize = Math.max(36, Math.min(w, h) * 0.095);
 
-      const devPos = devicePosRef.current;
-      const iconSize = Math.max(28, Math.min(w, h) * 0.07);
+      // Clear & background
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, w, h);
 
-      // ── Draw wires ──
-      LINKS.forEach(([a, b]) => {
-        const from = devPos[a];
-        const to = devPos[b];
-        if (!from || !to) return;
+      // Grid
+      drawGrid(ctx, w, h);
 
+      // Active links for glow
+      const activeLinks = getActiveLinks(envRef.current);
+
+      // Wires
+      LINKS.forEach(link => {
+        const a = dp[link.from];
+        const b = dp[link.to];
+        if (!a || !b) return;
+        const key = `${link.from}->${link.to}`;
+        drawWire(ctx, a, b, link.fromPort, link.toPort, activeLinks.has(key), iconSize);
+      });
+
+      // Devices
+      DEVICES.forEach(dev => {
+        const p = dp[dev.id];
+        if (!p) return;
+
+        const render = ICON_RENDERERS[dev.type];
+        const colors = C[dev.type] || C.server;
+        if (render) render(ctx, p.x, p.y, iconSize, colors);
+
+        // Status dot (green = up)
+        ctx.fillStyle = '#22c55e';
         ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
-        ctx.strokeStyle = '#1e293b';
-        ctx.lineWidth = 2;
+        ctx.arc(p.x + iconSize * 0.32, p.y - iconSize * 0.32, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#0b1120';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // Subtle direction indicator (small dot at midpoint)
-        const mx = (from.x + to.x) / 2;
-        const my = (from.y + to.y) / 2;
-        ctx.beginPath();
-        ctx.arc(mx, my, 2, 0, Math.PI * 2);
-        ctx.fillStyle = '#334155';
-        ctx.fill();
-      });
-
-      // ── Draw devices ──
-      DEVICES.forEach(dev => {
-        const pos = devPos[dev.id];
-        if (!pos) return;
-
-        drawDeviceIcon(ctx, dev.type, pos.x, pos.y, iconSize);
-
         // Label
-        ctx.font = `${Math.max(9, iconSize * 0.32)}px -apple-system, sans-serif`;
-        ctx.fillStyle = '#94a3b8';
+        const fs = Math.max(10, iconSize * 0.28);
+        ctx.font = `600 ${fs}px -apple-system, 'Segoe UI', sans-serif`;
+        ctx.fillStyle = C.textBright;
         ctx.textAlign = 'center';
-        const lines = dev.name.split('\n');
+        const lines = dev.label.split('\n');
         lines.forEach((line, i) => {
-          ctx.fillText(line, pos.x, pos.y + iconSize / 2 + 12 + i * 12);
+          ctx.fillText(line, p.x, p.y + iconSize * 0.48 + 14 + i * (fs + 2));
         });
+        // Sub-label (second line dimmer)
+        if (lines.length > 1) {
+          // already drawn above, just the first line is bright
+        }
       });
 
-      // ── Update & draw envelopes ──
-      envelopesRef.current = envelopesRef.current.filter(e => e.alive);
-      envelopesRef.current.forEach(e => {
-        // Update device map reference for responsive positions
-        e.deviceMap = devPos;
+      // Envelopes
+      envRef.current = envRef.current.filter(e => e.alive);
+      envRef.current.forEach(e => {
+        e.dmap = dp;
         e.update();
         e.draw(ctx);
       });
 
-      animFrameRef.current = requestAnimationFrame(animate);
+      // Legend
+      drawLegend(ctx, w, h);
+
+      animRef.current = requestAnimationFrame(draw);
     }
 
-    animate();
-    return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    };
+    draw();
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   }, []);
 
-  // Click handler
+  // Legend
+  function drawLegend(ctx, w, h) {
+    const lx = 12, ly = h - 14;
+    ctx.font = '10px monospace';
+    const items = [
+      { color: '#22d3ee', label: 'Normal' },
+      { color: '#ef4444', label: 'Blocked' },
+      { color: '#f97316', label: '5xx' },
+      { color: '#eab308', label: '4xx' },
+    ];
+    let ox = lx;
+    items.forEach(it => {
+      // Dot
+      ctx.fillStyle = it.color;
+      ctx.beginPath();
+      ctx.arc(ox, ly, 4, 0, Math.PI * 2);
+      ctx.fill();
+      // Text
+      ctx.fillStyle = C.text;
+      ctx.textAlign = 'left';
+      ctx.fillText(it.label, ox + 7, ly + 3);
+      ox += ctx.measureText(it.label).width + 22;
+    });
+  }
+
+  // Click
   const handleClick = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const x = (e.clientX - rect.left);
-    const y = (e.clientY - rect.top);
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    for (let i = envelopesRef.current.length - 1; i >= 0; i--) {
-      const env = envelopesRef.current[i];
-      if (env.containsPoint(x, y)) {
+    for (let i = envRef.current.length - 1; i >= 0; i--) {
+      if (envRef.current[i].hit(x, y)) {
         if (onParticleClick) {
-          onParticleClick(env.packet, { x: e.clientX, y: e.clientY });
+          onParticleClick(envRef.current[i].packet, { x: e.clientX, y: e.clientY });
         }
         return;
       }
@@ -488,7 +683,6 @@ function PacketParticles({ packets, onParticleClick }) {
         ref={canvasRef}
         onClick={handleClick}
         className="packet-sim-canvas"
-        style={{ cursor: 'crosshair' }}
       />
     </div>
   );
